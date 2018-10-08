@@ -1,0 +1,284 @@
+#+STARTUP: indent
+* 驱动
+** 串口
+*** 基本系统
+#+begin_src c :tangle /dev/shm/rfid-reader/uart.h
+  #ifndef __UART_H
+  #define __UART_H
+  #include <stdint.h>
+  #include "ring.h"
+  struct uart_context_t;
+  typedef void (* uart_start_fn)(void);
+  typedef void (* uart_setup_fn)(struct uart_context_t * ctx);
+  typedef void (* uart_eventloop_fn)(struct uart_context_t * ctx);
+  struct uart_context_t {
+    uint32_t baudrate;
+    uint8_t databits, stopbits;
+    struct ring_t * tx, * rx;
+    uint32_t loop_timer;
+    uint32_t loop_interval;
+    uint32_t tx_timer;
+    uint32_t tx_interval;
+    uint32_t tx_to_send;
+    //uint8_t uart;
+    uart_setup_fn setup;
+    uart_start_fn start;
+    uart_eventloop_fn eventloop;
+  };
+
+  void uart_init(uint8_t idx, struct uart_context_t * ctx);
+  void uart_setup(void);
+  void uart_start(void);
+  void uart_eventloop(void);
+  struct uart_context_t * uart_context(uint8_t idx);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/uart.c
+  #include <stddef.h>
+  #include <libopencm3/stm32/rcc.h>
+  #include <libopencm3/stm32/usart.h>
+  #include <libopencm3/stm32/gpio.h>
+  #include <libopencm3/cm3/nvic.h>
+  #include "defination.h"
+  #include "uart.h"
+  #include "console.h"
+
+  static int RCC_UART[5] = {
+    RCC_USART1,
+    RCC_USART2,
+    RCC_USART3,
+    RCC_UART4,
+    RCC_UART5,
+  };
+
+  static int RCC_UART_GPIO[5] = {
+    RCC_GPIOA,
+    RCC_GPIOA,
+    RCC_GPIOB,
+    RCC_GPIOC,
+    RCC_GPIOC | RCC_GPIOD,
+  };
+
+  static uint8_t NVIC_UART_IRQ[5] = {
+    NVIC_USART1_IRQ,
+    NVIC_USART2_IRQ,
+    NVIC_USART3_IRQ,
+    NVIC_UART4_IRQ,
+    NVIC_UART5_IRQ,
+  };
+
+  static uint32_t TX_GPIO_PORT[5] = {
+    GPIOA,
+    GPIOA,
+    GPIOB,
+    GPIOC,
+    GPIOC,
+  };
+
+  static uint32_t RX_GPIO_PORT[5] = {
+    GPIOA,
+    GPIOA,
+    GPIOB,
+    GPIOC,
+    GPIOD,
+  };
+
+  static int TX_GPIO_IO[5] = {
+    GPIO_USART1_TX,
+    GPIO_USART2_TX,
+    GPIO_USART3_TX,
+    GPIO_UART4_TX,
+    GPIO_UART5_TX,
+  };
+
+  static int RX_GPIO_IO[5] = {
+    GPIO_USART1_RX,
+    GPIO_USART2_RX,
+    GPIO_USART3_RX,
+    GPIO_UART4_RX,
+    GPIO_UART5_RX,
+  };
+
+  static uint32_t UART[5] = {
+    USART1,
+    USART2,
+    USART3,
+    UART4,
+    UART5,
+  };
+
+  static struct uart_context_t * ctxs[5] = { NULL, NULL, NULL, NULL, NULL };
+
+  void uart_init(uint8_t idx, struct uart_context_t * ctx) {
+    ctxs[idx - 1] = ctx;
+  }
+
+  void uart_setup() {
+    for (uint8_t i = 0; i < 5; i ++) {
+      if (ctxs[i] != NULL) {
+        ctxs[i]->setup(ctxs[i]);
+
+        rcc_periph_clock_enable(RCC_UART[i]);
+        rcc_periph_clock_enable(RCC_UART_GPIO[i]);
+
+        nvic_enable_irq(NVIC_UART_IRQ[i]);
+
+        gpio_set_mode(TX_GPIO_PORT[i], GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, TX_GPIO_IO[i]);
+        gpio_set_mode(RX_GPIO_PORT[i], GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, RX_GPIO_IO[i]);
+
+        /* Setup UART parameters. */
+        usart_set_baudrate(UART[i], ctxs[i]->baudrate);
+        usart_set_databits(UART[i], ctxs[i]->databits);
+        usart_set_stopbits(UART[i], ctxs[i]->stopbits);
+        usart_set_mode(UART[i], USART_MODE_TX_RX);
+        usart_set_parity(UART[i], USART_PARITY_NONE);
+        usart_set_flow_control(UART[i], USART_FLOWCONTROL_NONE);
+
+        /* Enable LOCK Receive interrupt. */
+        USART_CR1(UART[i]) |= USART_CR1_RXNEIE;
+
+        /* Finally enable the USART. */
+        usart_enable(UART[i]);
+
+      }
+    }
+  }
+
+  void uart_start() {
+    for (uint8_t i = 0; i < 5; i ++) {
+      if (ctxs[i] != NULL) {
+        if (ctxs[i]->start != NULL) {
+          ctxs[i]->start();
+        }
+      }
+    }
+  }
+
+  void uart_eventloop() {
+    for (uint8_t i = 0; i < 5; i ++) {
+      struct uart_context_t * ctx = ctxs[i];
+      if (ctx != NULL) {
+        if (systick > ctx->loop_timer) {
+          ctx->loop_timer = systick + ctx->loop_interval;
+        }
+        if (systick > ctx->tx_timer) {
+          ctx->tx_timer = systick + ctx->tx_interval;
+          if (ctx->tx_to_send == 0) {
+            if (ring_length(ctx->tx) > 1) {
+              // saved length as varint type
+              uint32_t len = 0;
+              uint8_t byte = 0;
+              uint8_t count = 0;
+              ring_read(ctx->tx, &byte);
+              while (byte > 127 && ring_length(ctx->tx) > 0) {
+                ring_read(ctx->tx, &byte);
+                len |= (byte & 0x7F) << (count * 7);
+                count ++;
+              }
+              len |= (byte & 0x7F) << (count * 7);
+
+              ctx->tx_to_send = len;
+              USART_CR1(UART[i]) |= USART_CR1_TXEIE;
+            }
+          } else {
+            USART_CR1(UART[i]) |= USART_CR1_TXEIE;
+          }
+        }
+        ctx->eventloop(ctx);
+      }
+    }
+  }
+
+  struct uart_context_t * uart_context(uint8_t idx) {
+    return ctxs[idx - 1];
+  }
+
+  static void uart_isr(uint8_t idx) {
+
+    uint8_t data = 0;
+    uint32_t result = 0;
+
+    struct uart_context_t * ctx = ctxs[idx];
+    if (ctx == NULL) return;
+
+    /* Check if we were called because of RXNE. */
+    if (((USART_CR1(UART[idx]) & USART_CR1_RXNEIE) != 0) && ((USART_SR(UART[idx]) & USART_SR_RXNE) != 0)) {
+
+      /* Retrieve the data from the peripheral. */
+      data = usart_recv(UART[idx]);
+      ring_write(ctx->rx, data);
+      if (ring_available(ctx->rx) == 0) {
+        /* Disable the RXNEIE interrupt */
+        USART_CR1(UART[idx]) &= ~USART_CR1_RXNEIE;
+      }
+    }
+
+    /* Check if we were called because of TXE. */
+    if (((USART_CR1(UART[idx]) & USART_CR1_TXEIE) != 0) && ((USART_SR(UART[idx]) & USART_SR_TXE) != 0)) {
+      if (ctx->tx_to_send == 0) {
+        USART_CR1(UART[idx]) &= ~USART_CR1_TXEIE;
+        //console_newline();
+        return;
+      }
+
+      result = ring_read(ctx->tx, &data);
+
+      if (result == 0) {
+        /* Disable the TXE interrupt, it's no longer needed. */
+        USART_CR1(UART[idx]) &= ~USART_CR1_TXEIE;
+        //console_newline();
+      } else {
+        /* Put data into the transmit register. */
+        usart_send(UART[idx], data);
+        ctx->tx_to_send --;
+        //console_byte(data);
+        //console_char(' ');
+      }
+    }
+  }
+
+  void usart1_isr(void) {
+    uart_isr(1 - 1);
+  }
+
+  void usart3_isr(void) {
+    uart_isr(3 - 1);
+  }
+
+  void uart4_isr(void) {
+    uart_isr(4 - 1);
+  }
+#+end_src
+** LED
+#+begin_src c :tangle /dev/shm/rfid-reader/led.h
+  #ifndef _LED_H
+  #define _LED_H
+
+  #include "defination.h"
+
+  #define led_on() do {                           \
+      gpio_clear(LED_PORT, LED_IO);               \
+    } while (0)
+
+  #define led_off() do {                          \
+      gpio_set(LED_PORT, LED_IO);                 \
+    } while (0)
+
+  void led_setup(void);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/led.c
+  #include <libopencm3/stm32/rcc.h>
+  #include <libopencm3/stm32/gpio.h>
+  #include "led.h"
+
+  void led_setup() {
+    rcc_periph_clock_enable (RCC_GPIOA);
+    rcc_periph_clock_enable (RCC_GPIOD);
+
+    /* Set GPIO8 (in GPIO port A) to 'output push-pull'. */
+    gpio_set_mode (GPIOA, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO8); // LED0
+    /* Set GPIO2 (in GPIO port D) to 'output push-pull'. */
+    //gpio_set_mode (GPIOD, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO2); // LED1
+  }
+#+end_src

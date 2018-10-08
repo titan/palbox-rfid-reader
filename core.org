@@ -1,0 +1,143 @@
+#+STARTUP: indent
+* 核心系统
+** 基本框架
+#+begin_src c :tangle /dev/shm/rfid-reader/rfid-reader.c
+  #include <stddef.h>
+  #include <libopencm3/stm32/dbgmcu.h>
+  #include <libopencm3/stm32/gpio.h>
+  #include <libopencm3/stm32/iwdg.h>
+  #include <libopencm3/stm32/rcc.h>
+  #include <libopencm3/stm32/usart.h>
+  #include <libopencm3/stm32/f1/bkp.h>
+  #include <libopencm3/stm32/pwr.h>
+  #include <libopencm3/cm3/systick.h>
+  #include "defination.h"
+  #include "ring.h"
+  #include "console.h"
+  #include "utility.h"
+  #include "uart.h"
+  #include "led.h"
+  #include "rfid.h"
+
+  #define sync_timestamp(result) do {                     \
+      if (result->parameter.timestamp > MIN_TIMESTAMP) {  \
+        timestamp = result->parameter.timestamp;          \
+        zone = result->parameter.zone;                    \
+        PWR_CR |= PWR_CR_DBP;                             \
+        BKP_DR1 = timestamp;                              \
+        BKP_DR2 = (timestamp >> 32);                      \
+        PWR_CR &= ~PWR_CR_DBP;                            \
+      }                                                   \
+    } while (0)
+
+  volatile uint32_t sn = 0;
+  volatile int64_t timestamp = 0;
+  volatile int64_t zone = 0;
+  volatile uint32_t reboot_start = 0;
+  volatile uint32_t systick = 0;
+  uint32_t randkey[4];
+  uint8_t * uid = (uint8_t *)randkey;
+
+  struct uart_context_t uart1_context;
+  struct uart_context_t uart4_context;
+
+  void sys_tick_handler(void);
+
+  void sys_tick_handler(void) {
+    systick ++;
+    timestamp ++;
+  }
+
+  <<setup>>
+  <<mainloop>>
+#+end_src
+** 配置
+#+begin_src c :noweb-ref setup
+  static void setup(void) {
+    bzero(&uart1_context, sizeof(struct uart_context_t));
+    uart1_context.setup = rfid_setup;
+
+    uart_init(1, &uart1_context);
+
+    /*
+    uart4_context.eventloop = uart4_eventloop;
+    uart4_context.setup = uart4_setup;
+    uart4_context.start = uart4_start;
+
+    uart_init(4, &uart4_context);
+    */
+
+    rcc_clock_setup_in_hse_8mhz_out_72mhz();
+    rcc_periph_clock_enable(RCC_AFIO);
+    rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_PWREN | RCC_APB1ENR_BKPEN);
+    gpio_primary_remap(AFIO_MAPR_SWJ_CFG_JTAG_OFF_SW_ON, AFIO_MAPR_USART3_REMAP_NO_REMAP);
+
+    uint64_t restored_timestamp = BKP_DR1 | (((uint64_t) BKP_DR2) << 32);
+
+    if (restored_timestamp > MIN_TIMESTAMP) {
+      timestamp = (int64_t) restored_timestamp;
+    }
+  #ifdef DEBUG
+    console_setup();
+  #endif
+    uart_setup();
+    led_setup();
+
+    systick = 0;
+
+    /* 72MHz / 8 => 9,000,000 counts per second */
+    systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
+
+    /* 9,000,000/9,000 = 1000 overflows per second - every 1 ms one interrupt */
+    /* SysTick interrupt every N clock pulses: set reload to N-1 */
+    systick_set_reload(8999);
+    systick_interrupt_enable();
+
+    systick_counter_enable();
+
+    randkey[0] = *(uint32_t*)(0x1ffff7e8);
+    randkey[1] = *(uint32_t*)(0x1ffff7ec);
+    randkey[2] = *(uint32_t*)(0x1ffff7f0);
+
+    iwdg_set_period_ms(30000);
+    iwdg_start();
+  }
+#+end_src
+** 主循环
+#+begin_src c :noweb-ref mainloop
+  uint32_t rfid_timer = 0;
+  int main(void) {
+
+    setup();
+    console_string("rfid-reader start\r\n");
+    for (int i = 0; i < 12; i ++) {
+      console_byte((uint8_t)*(((uint8_t *)randkey) + i));
+      console_string(" ");
+    }
+    console_newline();
+
+    reboot_start = systick;
+    uint32_t loop_timer = systick;
+    uart_start();
+    rfid_scan();
+    rfid_timer = systick + 9999;
+
+    while (1) {
+      if (systick > loop_timer) {
+        loop_timer = systick + 999; // interval of one second
+        if (timestamp > MIN_TIMESTAMP || (systick - reboot_start < 10 * 60 * 1000 )) {
+          iwdg_reset();
+        } else {
+          console_log("Stopping to feed watch dog\r\n");
+        }
+        if (systick > rfid_timer) {
+          rfid_stop();
+        }
+      }
+
+      uart_eventloop();
+    }
+
+    return 0;
+  }
+#+end_src

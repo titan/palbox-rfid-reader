@@ -1,0 +1,263 @@
+#+STARTUP: indent
+* 辅助代码
+** ring
+#+begin_src c :tangle /dev/shm/rfid-reader/ring.h
+  #ifndef __RING_H
+  #define __RING_H
+  #include <stdint.h>
+  struct ring_t {
+    uint8_t * data;
+    uint32_t head;
+    uint32_t tail;
+    uint32_t mask;
+  };
+
+  #define ring_length(r) ((r)->tail - (r)->head)
+
+  #define ring_is_empty(r) ((r)->head == (r)->tail)
+
+  #define ring_empty(r) do {  \
+      (r)->head = 0;          \
+      (r)->tail = 0;          \
+    } while(0)
+
+  #define ring_available(r) ((r)->mask + 1 - ring_length(r))
+
+  void ring_init(struct ring_t * ring, uint8_t * data, uint32_t bitsize);
+  uint32_t ring_write(struct ring_t * ring, uint8_t data);
+  uint32_t ring_write_array(struct ring_t * ring, uint8_t * data, uint32_t offset, uint32_t size);
+  uint32_t ring_read(struct ring_t * ring, uint8_t * data);
+  uint32_t ring_read_array(struct ring_t * ring, uint8_t * data, uint32_t offset, uint32_t size);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/ring.c
+  #include "ring.h"
+
+  #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+  void ring_init(struct ring_t * ring, uint8_t * data, uint32_t bitsize) {
+    ring->data = data;
+    ring->head = 0;
+    ring->tail = 0;
+    ring->mask = (2 << (bitsize - 1)) - 1;
+  }
+
+  uint32_t ring_write(struct ring_t * ring, uint8_t data) {
+    if (ring_available(ring) == 0) {
+      return 0;
+    }
+    ring->data[ring->tail & ring->mask] = data;
+    ring->tail += 1;
+    return 1;
+  }
+
+  uint32_t ring_write_array(struct ring_t * ring, uint8_t * data, uint32_t offset, uint32_t size) {
+    uint32_t cnt = 0;
+    while (ring_available(ring) > 0 && cnt < size) {
+      ring->data[ring->tail & ring->mask] = data[offset + cnt];
+      ring->tail += 1;
+      cnt ++;
+    }
+    return cnt;
+  }
+
+  uint32_t ring_read(struct ring_t * ring, uint8_t * data) {
+    if (ring_is_empty(ring)) {
+      return 0;
+    }
+
+    ,* data = ring->data[ring->head & ring->mask];
+    ring->head += 1;
+    return 1;
+  }
+
+  uint32_t ring_read_array(struct ring_t * ring, uint8_t * data, uint32_t offset, uint32_t size) {
+    uint32_t cnt = 0;
+    while (!ring_is_empty(ring) && cnt < size) {
+      data[offset + cnt] = ring->data[ring->head & ring->mask];
+      ring->head += 1;
+      cnt ++;
+    }
+    return cnt;
+  }
+#+end_src
+** stack
+#+begin_src c :tangle /dev/shm/rfid-reader/stack.h
+  #ifndef _STACK_H
+  #define _STACK_H
+  #include <stdint.h>
+
+  struct stack_t {
+    uint8_t * buffer;
+    int top;
+    uint32_t capacity;
+  };
+
+  void stack_init(struct stack_t * stack, uint8_t * buffer, uint32_t capacity);
+  uint32_t stack_push(struct stack_t * stack, uint8_t e);
+  uint32_t stack_pop(struct stack_t * stack);
+  uint32_t stack_top(struct stack_t * stack, uint8_t * e);
+  uint32_t stack_isempty(struct stack_t * stack);
+  void stack_clear(struct stack_t * stack);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/stack.c
+  #include "stack.h"
+
+  void stack_init(struct stack_t * stack, uint8_t * buffer, uint32_t capacity) {
+    stack->buffer = buffer;
+    stack->capacity = capacity;
+    stack->top = -1;
+  }
+
+  uint32_t stack_push(struct stack_t * stack, uint8_t e) {
+    if (stack->top < (int) stack->capacity) {
+      stack->top ++ ;
+      stack->buffer[stack->top] = e;
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+  uint32_t stack_pop(struct stack_t * stack) {
+    if (stack->top != -1) {
+      stack->top --;
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+  uint32_t stack_top(struct stack_t * stack, uint8_t * e) {
+    if (stack->top != -1) {
+      ,* e = stack->buffer[stack->top];
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+  uint32_t stack_isempty(struct stack_t * stack) {
+    return stack->top == -1;
+  }
+
+  void stack_clear(struct stack_t * stack) {
+    stack->top = -1;
+  }
+#+end_src
+** utility
+#+begin_src c :tangle /dev/shm/rfid-reader/utility.h
+  #ifndef _UTILITY_H
+  #define _UTILITY_H
+  #include <stdint.h>
+
+  void delay(uint32_t ms);
+  uint8_t uint_to_string(uint32_t num, char buf[10]);
+  uint8_t ulong_to_string(uint64_t num, char buf[20]);
+  uint32_t string_to_uint(char * buf, uint32_t size);
+  void bzero(void * base, uint32_t size);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/utility.c
+  #include "utility.h"
+  #include "console.h"
+
+  void delay(uint32_t ms) {
+    ms *= 1440 * 4; // 3360=168MHz, 1440=72MHz
+    while (ms--) {
+      __asm ("nop");
+    }
+  }
+
+  uint8_t uint_to_string(uint32_t num, char buf[10]) {
+    for (int i = 0; i < 10; i ++) {
+      buf[i] = 0;
+    }
+    if (num == 0) {
+      buf[0] = '0';
+      return 1;
+    }
+
+    uint8_t ptr = 0;
+    while (num != 0) {
+      buf[ptr ++] = (num % 10) + 0x30;
+      num /= 10;
+    }
+    for (uint32_t i = 0, len = ptr / 2; i < len; i ++) {
+      char tmp = buf[i];
+      buf[i] = buf[ptr - i - 1];
+      buf[ptr - i - 1] = tmp;
+    }
+    return ptr;
+  }
+
+  uint8_t ulong_to_string(uint64_t num, char buf[20]) {
+    for (int i = 0; i < 20; i ++) {
+      buf[i] = 0;
+    }
+    if (num == 0) {
+      buf[0] = '0';
+      return 1;
+    }
+
+    uint8_t ptr = 0;
+    while (num != 0) {
+      buf[ptr ++] = (num % 10) + 0x30;
+      num /= 10;
+    }
+    for (uint32_t i = 0, len = ptr / 2; i < len; i ++) {
+      char tmp = buf[i];
+      buf[i] = buf[ptr - i - 1];
+      buf[ptr - i - 1] = tmp;
+    }
+    return ptr;
+  }
+
+  uint32_t string_to_uint(char * buf, uint32_t size) {
+    uint32_t num = 0;
+    for (uint32_t i = 0; i < size; i ++) {
+      num *= 10;
+      switch (buf[i]) {
+      case '0':
+      case '1':
+      case '2':
+      case '3':
+      case '4':
+      case '5':
+      case '6':
+      case '7':
+      case '8':
+      case '9':
+        num += buf[i] - 0x30;
+      }
+    }
+    return num;
+  }
+
+  void bzero(void * base, uint32_t size) {
+    uint32_t end = (uint32_t)base + size;
+    while ((uint32_t)base != end) {
+      ,*(uint8_t *) base = 0;
+      base ++;
+    }
+  }
+#+end_src
+** 宏定义
+#+begin_src c :tangle /dev/shm/rfid-reader/defination.h
+  #ifndef __DEFINATION_H
+  #define __DEFINATION_H
+
+  #define LED_PORT                 GPIOA
+  #define LED_IO                   GPIO8
+
+  #define MIN_TIMESTAMP            1520213204000
+
+  #define MIN(a, b) ((a) < (b) ? (a) : (b))
+  #define QUOTE_(x) #x
+  #define QUOTE(x) QUOTE_(x)
+
+  extern volatile uint32_t systick;
+
+  #endif
+#+end_src

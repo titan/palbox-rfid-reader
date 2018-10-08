@@ -1,0 +1,7 @@
+#+TITLE: The core application for rfid reader based on STM32F103
+#+AUTHOR: Titan
+#+EMAIL: howay.tan@fengchaohuzhu.com
+#+DATE: <2018-09-28 Fri>
+#+KEYWORDS: stm32, cortex m3, rfid reader
+#+OPTIONS: H:4 toc:t
+#+STARTUP: indent

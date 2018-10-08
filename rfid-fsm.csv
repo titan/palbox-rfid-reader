@@ -1,0 +1,152 @@
+state\event,00,"01 09",0a,"0b 0c",0d,"0e 96",97,"98 ba",bb,"bc ff","countdown = 0"
+READY,,,,,,,,,"----
+BB",,
+BB,"set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","set cmd
+----
+BB CMD","(error)
+----
+READY"
+"BB CMD","(error)
+----
+READY","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","set countdown
+----
+BB CMD LEN","(error)
+----
+READY"
+"BB CMD LEN","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","append
+----
+BB CMD LEN DATING","(error)
+----
+READY"
+"BB CMD LEN DATING","append
+----","append
+----","append
+----","append
+----","append
+----","append
+----","append
+----","append
+----","append
+----","append
+----","----
+BB CMD LEN DATADONE"
+"BB CMD LEN DATADONE","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","set crc
+----
+BB CMD LEN DATADONE CRC","reset
+----
+READY"
+"BB CMD LEN DATADONE CRC","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","----
+BB CMD LEN DATADONE CRC 0D","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY"
+"BB CMD LEN DATADONE CRC 0D","reset
+----
+READY","reset
+----
+READY","callback
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY","reset
+----
+READY"

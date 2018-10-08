@@ -1,0 +1,196 @@
+#+STARTUP: indent
+* 基本框架
+#+begin_src c :tangle /dev/shm/rfid-reader/rfid.h
+  #ifndef __RFID_H
+  #define __RFID_H
+  #include <stdint.h>
+  #include "uart.h"
+  void rfid_setup(struct uart_context_t * ctx);
+  void rfid_scan(void);
+  void rfid_stop(void);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/rfid.c
+  #include "rfid.h"
+  #include "defination.h"
+  #include "ring.h"
+  #include "rfid-fsm.h"
+  #include "utility.h"
+  #include "console.h"
+
+  #define TX_BUFFER_BITSIZE 5
+  #define RX_BUFFER_BITSIZE 11
+
+  static struct ring_t tx, rx;
+  static uint8_t tx_buffer[2 << (TX_BUFFER_BITSIZE - 1)];
+  static uint8_t rx_buffer[2 << (RX_BUFFER_BITSIZE - 1)];
+  static uint32_t rx_timer = 0;
+
+  static uint32_t rfid_state;
+  <<rfid-context>>
+  static struct rfid_context_t rfid_ctx;
+
+  <<rfid-capture-event>>
+  <<rfid-mainloop>>
+  <<rfid-setup>>
+  <<rfid-action>>
+  <<rfid-scan>>
+  <<rfid-stop>>
+
+#+end_src
+* 配置
+#+begin_src c :noweb-ref rfid-setup
+  void rfid_setup(struct uart_context_t * ctx) {
+    ring_init(&tx, tx_buffer, TX_BUFFER_BITSIZE);
+    ring_init(&rx, rx_buffer, RX_BUFFER_BITSIZE);
+    ctx->tx = &tx;
+    ctx->rx = &rx;
+    ctx->baudrate = 115200;
+    ctx->databits = 8;
+    ctx->stopbits = 1;
+    ctx->tx_interval = 99; // 10ms
+    ctx->loop_interval = 1; // 1ms
+    ctx->eventloop = rfid_eventloop;
+    rfid_state = RFID_READY_STATE;
+    bzero(&rfid_ctx, sizeof(struct rfid_context_t));
+  }
+#+end_src
+* 主循环
+#+begin_src c :noweb-ref rfid-mainloop
+  static void rfid_eventloop(struct uart_context_t * ctx) {
+    (void)ctx;
+    rfid_capture_event();
+  }
+#+end_src
+* 协议状态机
+** 协议上下文
+#+begin_src c :noweb-ref rfid-context
+  struct rfid_context_t {
+    uint8_t buf[256];
+    uint8_t ptr;
+    uint8_t input;
+    uint8_t cmd;
+    uint8_t len;
+    uint8_t countdown;
+    uint8_t crc;
+  };
+#+end_src
+** 事件获取
+#+begin_src c :noweb-ref rfid-capture-event
+  <<rfid-parse-data>>
+  static void rfid_capture_event(void) {
+    uint32_t rxlen = ring_length(&rx);
+    if (rxlen > 0) {
+      rx_timer = systick + 999;
+      for (uint32_t i = 0; i < rxlen; i ++) {
+        if (rfid_ctx.countdown < 0xFF) {
+          rfid_ctx.countdown --;
+        }
+        uint8_t byte;
+        ring_read(&rx, &byte);
+        rfid_ctx.input = byte;
+        if (byte == 0) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_00_EVENT, &rfid_ctx);
+        } else if (0x01 <= byte && byte <= 0x09) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_01_09_EVENT, &rfid_ctx);
+        } else if (byte == 0x0A) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_0A_EVENT, &rfid_ctx);
+        } else if (0x0B <= byte && byte <= 0x0C) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_0B_0C_EVENT, &rfid_ctx);
+        } else if (byte == 0x0d) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_0D_EVENT, &rfid_ctx);
+        } else if (0x0E <= byte && byte <= 0x96) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_0E_96_EVENT, &rfid_ctx);
+        } else if (byte == 0x97) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_97_EVENT, &rfid_ctx);
+        } else if (0x98 <= byte && byte <= 0xBA) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_98_BA_EVENT, &rfid_ctx);
+        } else if (byte == 0xBB) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_BB_EVENT, &rfid_ctx);
+        } else if (0xBC <= byte) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_BC_FF_EVENT, &rfid_ctx);
+        }
+        if (rfid_ctx.countdown == 0) {
+          rfid_state = rfid_transform_state(rfid_state, RFID_COUNTDOWN_EQUALS_0_EVENT, &rfid_ctx);
+        }
+      }
+    }
+  }
+#+end_src
+** 执行动作
+#+begin_src c :noweb-ref rfid-action
+  void rfid_do_action(enum RFID_ACTION action, void * data) {
+    struct rfid_context_t * ctx = (struct rfid_context_t *) data;
+    switch (action) {
+    case RFID_SET_CMD_ACTION:
+      ctx->cmd = ctx->input;
+      break;
+    case RFID_SET_COUNTDOWN_ACTION:
+      ctx->len = ctx->input;
+      ctx->countdown = ctx->input;
+      break;
+    case RFID_APPEND_ACTION:
+      ctx->buf[ctx->ptr ++] = ctx->input;
+      break;
+    case RFID_SET_CRC_ACTION:
+      ctx->crc = ctx->input;
+      break;
+    case RFID_RESET_ACTION:
+      ctx->cmd = 0;
+      ctx->len = 0;
+      ctx->crc = 0;
+      ctx->ptr = 0;
+      ctx->countdown = 0;
+      break;
+    case RFID_CALLBACK_ACTION: {
+      if (ctx->cmd == 0x97) {
+        uint8_t crc = ctx->cmd + ctx->len;
+        for (uint8_t i = 0; i < ctx->ptr; i ++) {
+          crc += ctx->buf[i];
+        }
+        if (crc == ctx->crc) {
+          // callback
+          rfid_parse_data(ctx->buf, ctx->ptr);
+          ctx->cmd = 0;
+          ctx->len = 0;
+          ctx->crc = 0;
+          ctx->ptr = 0;
+          ctx->countdown = 0;
+        }
+      }
+      break;
+    }
+    }
+  }
+#+end_src
+** 解析数据
+#+begin_src c :noweb-ref rfid-parse-data
+  static void rfid_parse_data(uint8_t * buf, uint8_t len) {
+    (void)len;
+    uint8_t result[6];
+    for (uint8_t i = 0; i < 6; i++) {
+      result[i] = buf[i + 2] ^ buf[i + 6 + 2];
+      console_byte(result[i]);
+      console_char(' ');
+    }
+    console_newline();
+  }
+#+end_src
+* 扫描RFID
+#+begin_src c :noweb-ref rfid-scan
+  void rfid_scan(void) {
+    uint8_t cmd[9] = {0x08, 0xBB, 0x17, 0x02, 0x00, 0x00, 0x19, 0x0D, 0x0A};
+    if (ring_available(&tx) > 8) {
+      ring_write_array(&tx, cmd, 0, 9);
+    }
+  }
+#+end_src
+* 终止扫描
+#+begin_src c :noweb-ref rfid-stop
+  void rfid_stop(void) {
+    uint8_t cmd[7] = {0x06, 0xBB, 0x18, 0x00, 0x18, 0x0D, 0x0A};
+    if (ring_available(&tx) > 6) {
+      ring_write_array(&tx, cmd, 0, 7);
+    }
+  }
+#+end_src

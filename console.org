@@ -1,0 +1,143 @@
+#+STARTUP: indent
+* 日志输出
+#+begin_src c :tangle /dev/shm/rfid-reader/console.h
+  #ifndef __CONSOLE_H
+  #define __CONSOLE_H
+  #include "ring.h"
+  #include "defination.h"
+  #include "utility.h"
+
+  void console_setup(void);
+
+  #ifdef DEBUG
+
+  void _console_output(uint8_t * data, uint32_t len);
+  void _console_byte(uint8_t data);
+  void _console_char(char data);
+  void _console_string(char * data);
+
+  #define console_output(data, len) do {_console_output(data, len);} while(0)
+  #define console_byte(data) do {_console_byte(data);} while(0)
+  #define console_char(data) do {_console_char(data);} while(0)
+  #define console_string(data) do {_console_string(data);} while(0)
+
+  #define console_newline() do { _console_string("\r\n"); } while(0)
+
+  #define console_number(data) do {                                       \
+      char _console_buf[10];                                              \
+      uint8_t _console_number_len = uint_to_string(data, _console_buf);   \
+      if (_console_number_len > 0) _console_output((uint8_t *)_console_buf, _console_number_len); \
+    } while (0)
+
+  #define console_number64(data) do {                                     \
+      char _console_buf[20];                                              \
+      uint8_t _console_number_len = ulong_to_string(data, _console_buf);  \
+      if (_console_number_len > 0) _console_output((uint8_t *)_console_buf, _console_number_len); \
+    } while (0)
+  #define console_log(data) do {                  \
+      console_string(data);                       \
+    } while (0)
+  #else
+  #define console_output(data, len)
+  #define console_char(data)
+  #define console_byte(data)
+  #define console_string(data)
+  #define console_newline()
+  #define console_number(data)
+  #define console_number64(data)
+  #define console_log(data)
+  #endif
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/console.c
+  #include <libopencm3/stm32/dbgmcu.h>
+  #include <libopencm3/cm3/scs.h>
+  #include <libopencm3/cm3/tpiu.h>
+  #include <libopencm3/cm3/itm.h>
+  #include "console.h"
+  #include "defination.h"
+
+  void console_setup(void) {
+  }
+
+  #ifdef DEBUG
+
+  void _console_output(uint8_t * data, uint32_t len) {
+    for (uint32_t i = 0; i < len; i ++) {
+      console_char((char) data[i]);
+    }
+    //delay(10);
+  }
+
+  void _console_char(char c) {
+    while (!(ITM_STIM8(0) & ITM_STIM_FIFOREADY))
+      ;
+
+    ITM_STIM8(0) = c;
+  }
+
+  void _console_byte(uint8_t data) {
+    for (int i = 0; i < 2; i++) {
+      switch((data >> (8 - 4 * (i + 1))) & 0x0F) {
+      case 0x0:
+        console_char('0');
+        break;
+      case 0x1:
+        console_char('1');
+        break;
+      case 0x2:
+        console_char('2');
+        break;
+      case 0x3:
+        console_char('3');
+        break;
+      case 0x4:
+        console_char('4');
+        break;
+      case 0x5:
+        console_char('5');
+        break;
+      case 0x6:
+        console_char('6');
+        break;
+      case 0x7:
+        console_char('7');
+        break;
+      case 0x8:
+        console_char('8');
+        break;
+      case 0x9:
+        console_char('9');
+        break;
+      case 0xA:
+        console_char('A');
+        break;
+      case 0xB:
+        console_char('B');
+        break;
+      case 0xC:
+        console_char('C');
+        break;
+      case 0xD:
+        console_char('D');
+        break;
+      case 0xE:
+        console_char('E');
+        break;
+      case 0xF:
+        console_char('F');
+        break;
+      }
+    }
+    //delay(10);
+  }
+
+  void _console_string(char * data) {
+    while (* data != '\0') {
+      console_char(*(char *)data);
+      data ++;
+    }
+    //delay(10);
+  }
+  #endif
+#+end_src
