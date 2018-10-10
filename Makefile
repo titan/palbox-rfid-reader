@@ -8,7 +8,7 @@ BUILDSRC:=$(BUILDDIR)/Makefile
 CONSOLESRC:=$(BUILDDIR)/console.c
 CORESRC:=$(BUILDDIR)/rfid-reader.c
 DRIVERSRC:=$(BUILDDIR)/uart.c
-UTILITYSRC:=$(BUILDDIR)/utility.c $(BUILDDIR)/ring.c $(BUILDDIR)/stack.c $(BUILDDIR)/defination.h
+UTILITYSRC:=$(BUILDDIR)/utility.c $(BUILDDIR)/ring.c $(BUILDDIR)/sbtree.c $(BUILDDIR)/stack.c $(BUILDDIR)/defination.h
 RFIDSRC:=$(BUILDDIR)/rfid.c $(BUILDDIR)/rfid.h
 RFIDFSMSRC:=$(BUILDDIR)/rfid-fsm.c
 

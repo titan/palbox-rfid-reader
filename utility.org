@@ -81,6 +81,206 @@
     return cnt;
   }
 #+end_src
+** sbtree
+#+begin_src c :tangle /dev/shm/rfid-reader/sbtree.h
+  #ifndef __SBTREE_H
+  #define __SBTREE_H
+  #include <stdint.h>
+  #include <stdlib.h>
+
+  typedef uint16_t sbtidx_t;
+
+  struct sbtree_t {
+    sbtidx_t num;
+    sbtidx_t header;
+    sbtidx_t root;
+    sbtidx_t * left;
+    sbtidx_t * right;
+    sbtidx_t * size;
+    sbtidx_t * key;
+  };
+
+  typedef void (* seqfun)(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len);
+
+  sbtidx_t sbtree_insert(struct sbtree_t * tree, sbtidx_t key);
+  sbtidx_t sbtree_delete(struct sbtree_t * tree, sbtidx_t key);
+  sbtidx_t sbtree_find(struct sbtree_t * tree, sbtidx_t key);
+  void sbtree_sequence(struct sbtree_t * tree, seqfun seq, void * data, size_t len);
+  void sbtree_init(struct sbtree_t * tree, sbtidx_t * left, sbtidx_t * right, sbtidx_t * size, sbtidx_t * key, sbtidx_t n);
+  void sbtree_clear(struct sbtree_t * tree);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/sbtree.c
+  #include <string.h>
+  #include "sbtree.h"
+
+  #define LEFT(t) tree->left[t]
+  #define RIGHT(t) tree->right[t]
+  #define SIZE(t) tree->size[t]
+  #define KEY(t) tree->key[t]
+  #define LEFT_ROTATE(t) sbtree_left_rotate(tree, t)
+  #define RIGHT_ROTATE(t) sbtree_right_rotate(tree, t)
+  #define MAINTAIN(t, flag) sbtree_maintain(tree, t, flag)
+  #define INSERT(t, k, p) _sbtree_insert(tree, t, k, p)
+  #define DELETE(t, k, d) _sbtree_delete(tree, t, k, d)
+  #define FIND(t, k) _sbtree_find(tree, t, k)
+  #define SEQUENCE(t, seq, d, l) _sbtree_sequence(tree, t, seq, d, l)
+
+  static sbtidx_t sbtree_left_rotate(struct sbtree_t * tree, sbtidx_t t) {
+    sbtidx_t k = RIGHT(t);
+    RIGHT(t) = LEFT(k);
+    LEFT(k) = t;
+    SIZE(k) = SIZE(t);
+    SIZE(t) = SIZE(LEFT(t)) + SIZE(RIGHT(t)) + 1;
+    return k;
+  }
+
+  static sbtidx_t sbtree_right_rotate(struct sbtree_t * tree, sbtidx_t t) {
+    sbtidx_t k = LEFT(t);
+    LEFT(t) = RIGHT(k);
+    RIGHT(k) = t;
+    SIZE(k) = SIZE(t);
+    SIZE(t) = SIZE(LEFT(t)) + SIZE(RIGHT(t)) + 1;
+    return k;
+  }
+
+  static sbtidx_t sbtree_maintain(struct sbtree_t * tree, sbtidx_t t, const uint8_t flag) {
+    if (flag == 0) {
+      if (SIZE(LEFT(LEFT(t))) > SIZE(RIGHT(t))) { // case 1
+        t = RIGHT_ROTATE(t);
+      } else {
+        if (SIZE(RIGHT(LEFT(t))) > SIZE(RIGHT(t))) { // case 2
+          LEFT(t) = LEFT_ROTATE(LEFT(t));
+          t = RIGHT_ROTATE(t);
+        } else {
+          return t;
+        }
+      }
+    } else {
+      if (SIZE(RIGHT(RIGHT(t))) > SIZE(LEFT(t))) { // case 1'
+        t = LEFT_ROTATE(t);
+      } else {
+        if (SIZE(LEFT(RIGHT(t))) > SIZE(LEFT(t))) { // case 2'
+          RIGHT(t) = RIGHT_ROTATE(RIGHT(t));
+          t = LEFT_ROTATE(t);
+        } else {
+          return t;
+        }
+      }
+    }
+    LEFT(t) = MAINTAIN(LEFT(t), 0); // repair the left subtree
+    RIGHT(t) = MAINTAIN(RIGHT(t), 1); // repair the right subtree
+    t = MAINTAIN(t, 0); // repair the whole tree
+    t = MAINTAIN(t, 1); // repair the whole tree
+    return t;
+  }
+
+  static sbtidx_t _sbtree_insert(struct sbtree_t * tree, sbtidx_t t, sbtidx_t key, sbtidx_t * pos) {
+    if (t == 0) {
+      t = ++ tree->header;
+      KEY(t) = key;
+      SIZE(t) = 1;
+      LEFT(t) = 0;
+      RIGHT(t) = 0;
+      ,* pos = t;
+      return t;
+    } else {
+      SIZE(t) = SIZE(t) + 1;
+      if (key < KEY(t)) {
+        LEFT(t) = INSERT(LEFT(t), key, pos);
+      } else {
+        RIGHT(t) = INSERT(RIGHT(t), key, pos);
+      }
+      t = MAINTAIN(t, key >= KEY(t));
+      return t;
+    }
+  }
+
+  sbtidx_t sbtree_insert(struct sbtree_t * tree, sbtidx_t key) {
+    sbtidx_t pos;
+    tree->root = INSERT(tree->root, key, &pos);
+    return pos;
+  }
+
+  static sbtidx_t _sbtree_delete(struct sbtree_t * tree, sbtidx_t t, sbtidx_t key, sbtidx_t * deleted) {
+    SIZE(t)--;
+    if ((key == KEY(t)) || (key < KEY(t) && LEFT(t) == 0) || (key > KEY(t) && RIGHT(t) == 0)) {
+      ,* deleted = KEY(t);
+      if (LEFT(t) == 0 || RIGHT(t) == 0) {
+        return LEFT(t) + RIGHT(t);
+      } else {
+        LEFT(t) = DELETE(LEFT(t), KEY(t) + 1, &KEY(t));
+        return t;
+      }
+    } else {
+      if (key < KEY(t)) {
+        LEFT(t) = DELETE(LEFT(t), key, deleted);
+        return t;
+      } else {
+        RIGHT(t) = DELETE(RIGHT(t), key, deleted);
+        return t;
+      }
+    }
+  }
+
+  sbtidx_t sbtree_delete(struct sbtree_t * tree, sbtidx_t key) {
+    sbtidx_t deleted;
+    tree->root = DELETE(tree->root, key, &deleted);
+    return deleted;
+  }
+
+  static sbtidx_t _sbtree_find(struct sbtree_t * tree, sbtidx_t t, sbtidx_t key) {
+    if (t == 0) return 0;
+    if (key < KEY(t)) {
+      return FIND(LEFT(t), key);
+    } else if (key == KEY(t)) {
+      return t;
+    } else {
+      return FIND(RIGHT(t), key);
+    }
+  }
+
+  sbtidx_t sbtree_find(struct sbtree_t * tree, sbtidx_t key) {
+    return FIND(tree->root, key);
+  }
+
+  static void _sbtree_sequence(struct sbtree_t * tree, sbtidx_t t, seqfun seq, void * data, sbtidx_t len) {
+    if (LEFT(t) != 0) {
+      SEQUENCE(LEFT(t), seq, data, len);
+    }
+    seq(tree, t, data, len);
+    if (RIGHT(t) != 0) {
+      SEQUENCE(RIGHT(t), seq, data, len);
+    }
+  }
+
+  void sbtree_sequence(struct sbtree_t * tree, seqfun seq, void * data, size_t len) {
+    SEQUENCE(tree->root, seq, data, len);
+  }
+
+  void sbtree_init(struct sbtree_t * tree, sbtidx_t * left, sbtidx_t * right, sbtidx_t * size, sbtidx_t * key, sbtidx_t n) {
+    tree->header = 0;
+    tree->num = n;
+    tree->root = 0;
+    tree->left = left;
+    tree->right = right;
+    tree->size = size;
+    tree->key = key;
+    memset(left, 0, sizeof(sbtidx_t) * n);
+    memset(right, 0, sizeof(sbtidx_t) * n);
+    memset(size, 0, sizeof(sbtidx_t) * n);
+    memset(key, 0, sizeof(sbtidx_t) * n);
+  }
+
+  void sbtree_clear(struct sbtree_t * tree) {
+    tree->header = 0;
+    tree->root = 0;
+    memset(tree->left, 0, sizeof(sbtidx_t) * tree->num);
+    memset(tree->right, 0, sizeof(sbtidx_t) * tree->num);
+    memset(tree->size, 0, sizeof(sbtidx_t) * tree->num);
+    memset(tree->key, 0, sizeof(sbtidx_t) * tree->num);
+  }
+#+end_src
 ** stack
 #+begin_src c :tangle /dev/shm/rfid-reader/stack.h
   #ifndef _STACK_H
