@@ -316,7 +316,7 @@
 #+begin_src makefile :tangle /dev/shm/rfid-reader/Makefile
   BINARY = rfid-reader
 
-  OBJS += console.o led.o rfid-fsm.o rfid.o ring.o sbtree.o stack.o utility.o uart.o
+  OBJS += console.o core-fsm.o led.o rfid-fsm.o rfid.o ring.o sbtree.o stack.o utility.o uart.o
 
   CFLAGS +=
 

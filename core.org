@@ -3,6 +3,7 @@
 ** 基本框架
 #+begin_src c :tangle /dev/shm/rfid-reader/rfid-reader.c
   #include <stddef.h>
+  #include <string.h>
   #include <libopencm3/stm32/dbgmcu.h>
   #include <libopencm3/stm32/gpio.h>
   #include <libopencm3/stm32/iwdg.h>
@@ -18,6 +19,8 @@
   #include "uart.h"
   #include "led.h"
   #include "rfid.h"
+  #include "core-fsm.h"
+  #include "sbtree.h"
 
   #define sync_timestamp(result) do {                     \
       if (result->parameter.timestamp > MIN_TIMESTAMP) {  \
@@ -37,9 +40,14 @@
   volatile uint32_t systick = 0;
   uint32_t randkey[4];
   uint8_t * uid = (uint8_t *)randkey;
+  uint32_t core_state;
 
   struct uart_context_t uart1_context;
   struct uart_context_t uart4_context;
+
+  <<rfid-cache-define>>
+  <<rfid-get-key>>
+  <<rfid-callback>>
 
   void sys_tick_handler(void);
 
@@ -47,9 +55,9 @@
     systick ++;
     timestamp ++;
   }
-
   <<setup>>
   <<mainloop>>
+  <<core-fsm>>
 #+end_src
 ** 配置
 #+begin_src c :noweb-ref setup
@@ -119,8 +127,10 @@
     reboot_start = systick;
     uint32_t loop_timer = systick;
     uart_start();
-    rfid_scan();
-    rfid_timer = systick + 9999;
+    rfid_cache_init();
+    core_state = core_transform_state(core_state, CORE_INVENTORY_EVENT, NULL);
+
+    uint8_t diff = 0;
 
     while (1) {
       if (systick > loop_timer) {
@@ -130,8 +140,14 @@
         } else {
           console_log("Stopping to feed watch dog\r\n");
         }
-        if (systick > rfid_timer) {
-          rfid_stop();
+        if (core_state == CORE_INVENTORY_SCANNING_STATE || core_state == CORE_DIFFERENCE_SCANNING_STATE) {
+          if (systick > rfid_timer) {
+            core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, NULL);
+          }
+        }
+        if (diff == 0 && core_state == CORE_READY_STATE) {
+          diff = 1;
+          core_state = core_transform_state(core_state, CORE_DIFFERENCE_EVENT, NULL);
         }
       }
 
@@ -141,3 +157,144 @@
     return 0;
   }
 #+end_src
+** RFID 缓存
+*** 定义
+由于 size balanced tree 不保存卫星数据， 因此引入 rfid data 用于保存标
+签数据。
+#+begin_src c :noweb-ref rfid-cache-define
+  #define MAXRFID 300
+  #define TAGSIZE 6
+  static struct sbtree_t tree1, tree2;
+  static sbtidx_t rfid_sbtree_left1[MAXRFID], rfid_sbtree_right1[MAXRFID], rfid_sbtree_size1[MAXRFID], rfid_sbtree_key1[MAXRFID];
+  static sbtidx_t rfid_sbtree_left2[MAXRFID], rfid_sbtree_right2[MAXRFID], rfid_sbtree_size2[MAXRFID], rfid_sbtree_key2[MAXRFID];
+  static struct sbtree_t * cache_old, * cache_young;
+  static uint8_t rfid_data1[MAXRFID * TAGSIZE], rfid_data2[MAXRFID * TAGSIZE];
+  static uint8_t * data_old, * data_young;
+
+  static void rfid_cache_init(void) {
+    sbtree_init(&tree1, rfid_sbtree_left1, rfid_sbtree_right1, rfid_sbtree_size1, rfid_sbtree_key1, MAXRFID);
+    sbtree_init(&tree2, rfid_sbtree_left2, rfid_sbtree_right2, rfid_sbtree_size2, rfid_sbtree_key2, MAXRFID);
+    cache_old = &tree1;
+    cache_young = &tree2;
+    data_old = (uint8_t *) rfid_data1;
+    data_young = (uint8_t *) rfid_data2;
+    bzero(data_old, MAXRFID * TAGSIZE);
+    bzero(data_young, MAXRFID * TAGSIZE);
+  }
+#+end_src
+*** 计算 KEY
+根据标签数据计算得到 size balanced tree 所需的 key。
+#+begin_src c :noweb-ref rfid-get-key
+  static sbtidx_t getkey(uint8_t * tag, size_t len) {
+    (void) len;
+    uint8_t lsb = tag[0] ^ tag[2] ^ tag[4];
+    uint8_t msb = tag[1] ^ tag[3] ^ tag[5];
+    return (msb << 8) | lsb;
+  }
+#+end_src
+** RFID 回调
+#+begin_src c :noweb-ref rfid-callback
+  void rfid_callback(uint8_t * tag, size_t len) {
+    void * data[2];
+    data[0] = tag;
+    data[1] = &len;
+    core_state = core_transform_state(core_state, CORE_SCANNED_EVENT, data);
+  }
+#+end_src
+** 核心状态机
+#+begin_src c :noweb-ref core-fsm
+  static void new_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
+    (void) tree;
+    (void) len;
+    uint16_t * ptr = (uint16_t *)data;
+    uint8_t * tags = (uint8_t *)(data + 2);
+    if (sbtree_find(cache_old, getkey(data_young + t * TAGSIZE, TAGSIZE)) == 0) {
+      tags[* ptr] = t;
+      ,* ptr += 1;
+    }
+  }
+
+  static void missing_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
+    (void) tree;
+    (void) len;
+    uint16_t * ptr = (uint16_t *)data;
+    uint8_t * tags = (uint8_t *)(data + 2);
+    if (sbtree_find(cache_young, getkey(data_old + t * TAGSIZE, TAGSIZE)) == 0) {
+      tags[* ptr] = t;
+      ,* ptr += 1;
+    }
+  }
+
+  void core_do_action(enum CORE_ACTION action, void * data) {
+    switch (action) {
+    case CORE_SWAP_AND_SCAN_ACTION: {
+      struct sbtree_t * tmp = cache_old;
+      cache_old = cache_young;
+      cache_young = tmp;
+      uint8_t * temp = data_old;
+      data_old = data_young;
+      data_young = temp;
+      sbtree_clear(cache_young);
+      bzero(temp, MAXRFID * TAGSIZE);
+      rfid_scan();
+      rfid_timer = systick + 9999;
+      break;
+    }
+    case CORE_SAVE_TO_YOUNG_CACHE_ACTION: {
+      uint8_t * tag = * (uint8_t **) data;
+      size_t len = * (size_t *)(((size_t **) data)[1]);
+      sbtidx_t key = getkey(tag, len);
+      if (sbtree_find(cache_young, key) == 0) {
+        sbtidx_t pos = sbtree_insert(cache_young, key);
+        console_log("key: ");
+        console_number(key);
+        console_string(", len: ");
+        console_number(len);
+        console_string(", pos: ");
+        console_number(pos);
+        console_newline();
+        memcpy(data_young + pos * TAGSIZE, tag, len);
+      }
+      break;
+    }
+    case CORE_STOP_SCAN_ACTION:
+      rfid_stop();
+      break;
+    case CORE_STOP_SCAN_NEWLINE_CALCULATE_DIFFERENCE_ACTION: {
+      rfid_stop();
+      uint8_t newtags[(MAXRFID + 2)]; // the first 2 bytes is reversed for length of array
+      uint8_t missingtags[(MAXRFID + 2)]; // the first 2 bytes is reversed for length of array
+      bzero(newtags, (MAXRFID + 2));
+      bzero(missingtags, (MAXRFID + 2));
+      sbtree_sequence(cache_young, new_seq, newtags, (MAXRFID + 2));
+      sbtree_sequence(cache_old, missing_seq, missingtags, (MAXRFID + 2));
+      console_log("new tags:\r\n");
+      for (uint32_t i = 0; i < * (uint16_t *) newtags; i ++) {
+        sbtidx_t pos = * (newtags + 2 + i);
+        if (pos == 0) continue;
+        for (uint8_t j = 0; j < 6; j ++) {
+          console_byte(data_young[pos * TAGSIZE + j]);
+          console_char(' ');
+        }
+        console_newline();
+      }
+      console_newline();
+      console_log("missing tags:\r\n");
+      for (uint32_t i = 0; i < * (uint16_t *) missingtags; i ++) {
+        sbtidx_t pos = * (missingtags + 2 + i);
+        if (pos == 0) continue;
+        for (uint8_t j = 0; j < 6; j ++) {
+          console_byte(data_old[pos * TAGSIZE + j]);
+          console_char(' ');
+        }
+        console_newline();
+      }
+      console_newline();
+      break;
+    }
+    }
+  }
+#+end_src
+
+在计算新旧数据差集时，结果数组 newtags, missingtags 的前 TAGSIZE 个字
+节空出来，预留给数组有效数据的长度。真正的 TAG 数据在 TAGSIZE 后保存。

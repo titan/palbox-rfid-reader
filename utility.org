@@ -447,6 +447,7 @@
 #+begin_src c :tangle /dev/shm/rfid-reader/defination.h
   #ifndef __DEFINATION_H
   #define __DEFINATION_H
+  #include <stdlib.h>
 
   #define LED_PORT                 GPIOA
   #define LED_IO                   GPIO8
@@ -458,6 +459,7 @@
   #define QUOTE(x) QUOTE_(x)
 
   extern volatile uint32_t systick;
+  extern void rfid_callback(uint8_t * tag, size_t len);
 
   #endif
 #+end_src
