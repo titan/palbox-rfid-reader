@@ -19,7 +19,7 @@
   #include "uart.h"
   #include "led.h"
   #include "rfid.h"
-  #include "core-fsm.h"
+  #include "task-fsm.h"
   #include "sbtree.h"
 
   #define sync_timestamp(result) do {                     \
@@ -40,7 +40,7 @@
   volatile uint32_t systick = 0;
   uint32_t randkey[4];
   uint8_t * uid = (uint8_t *)randkey;
-  uint32_t core_state;
+  uint32_t task_state;
 
   struct uart_context_t uart1_context;
   struct uart_context_t uart4_context;
@@ -57,7 +57,7 @@
   }
   <<setup>>
   <<mainloop>>
-  <<core-fsm>>
+  <<task-fsm>>
 #+end_src
 ** 配置
 #+begin_src c :noweb-ref setup
@@ -128,7 +128,7 @@
     uint32_t loop_timer = systick;
     uart_start();
     rfid_cache_init();
-    core_state = core_transform_state(core_state, CORE_INVENTORY_EVENT, NULL);
+    task_state = task_transform_state(task_state, TASK_INVENTORY_EVENT, NULL);
 
     uint8_t diff = 0;
 
@@ -140,14 +140,14 @@
         } else {
           console_log("Stopping to feed watch dog\r\n");
         }
-        if (core_state == CORE_INVENTORY_SCANNING_STATE || core_state == CORE_DIFFERENCE_SCANNING_STATE) {
+        if (task_state == TASK_INVENTORY_SCANNING_STATE || task_state == TASK_DIFFERENCE_SCANNING_STATE) {
           if (systick > rfid_timer) {
-            core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, NULL);
+            task_state = task_transform_state(task_state, TASK_TIMEOUT_EVENT, NULL);
           }
         }
-        if (diff == 0 && core_state == CORE_READY_STATE) {
+        if (diff == 0 && task_state == TASK_READY_STATE) {
           diff = 1;
-          core_state = core_transform_state(core_state, CORE_DIFFERENCE_EVENT, NULL);
+          task_state = task_transform_state(task_state, TASK_DIFFERENCE_EVENT, NULL);
         }
       }
 
@@ -198,11 +198,11 @@
     void * data[2];
     data[0] = tag;
     data[1] = &len;
-    core_state = core_transform_state(core_state, CORE_SCANNED_EVENT, data);
+    task_state = task_transform_state(task_state, TASK_SCANNED_EVENT, data);
   }
 #+end_src
-** 核心状态机
-#+begin_src c :noweb-ref core-fsm
+** 任务状态机
+#+begin_src c :noweb-ref task-fsm
   static void new_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
     (void) tree;
     (void) len;
@@ -225,9 +225,9 @@
     }
   }
 
-  void core_do_action(enum CORE_ACTION action, void * data) {
+  void task_do_action(enum TASK_ACTION action, void * data) {
     switch (action) {
-    case CORE_SWAP_AND_SCAN_ACTION: {
+    case TASK_SWAP_AND_SCAN_ACTION: {
       struct sbtree_t * tmp = cache_old;
       cache_old = cache_young;
       cache_young = tmp;
@@ -240,7 +240,7 @@
       rfid_timer = systick + 9999;
       break;
     }
-    case CORE_SAVE_TO_YOUNG_CACHE_ACTION: {
+    case TASK_SAVE_TO_YOUNG_CACHE_ACTION: {
       uint8_t * tag = * (uint8_t **) data;
       size_t len = * (size_t *)(((size_t **) data)[1]);
       sbtidx_t key = getkey(tag, len);
@@ -257,10 +257,10 @@
       }
       break;
     }
-    case CORE_STOP_SCAN_ACTION:
+    case TASK_STOP_SCAN_ACTION:
       rfid_stop();
       break;
-    case CORE_STOP_SCAN_NEWLINE_CALCULATE_DIFFERENCE_ACTION: {
+    case TASK_STOP_SCAN_NEWLINE_CALCULATE_DIFFERENCE_ACTION: {
       rfid_stop();
       uint8_t newtags[(MAXRFID + 2)]; // the first 2 bytes is reversed for length of array
       uint8_t missingtags[(MAXRFID + 2)]; // the first 2 bytes is reversed for length of array
