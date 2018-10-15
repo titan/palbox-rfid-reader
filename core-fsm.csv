@@ -1,15 +1,33 @@
-state\event,inventory,difference,SCANNED,TIMEOUT
-READY,"swap and scan
+state\event,"inventory, rfid idle","inventory, rfid busy","difference, rfid idle","difference, rfid busy","data, rfid idle","data, rfid busy",timeout
+READY,"inventory
+ack
+start timer
 ----
-INVENTORY SCANNING","swap and scan
+INVENTORYING","inventory error
+----","difference
+ack
+start timer
 ----
-DIFFERENCE SCANNING",,
-"INVENTORY SCANNING",,,"save to young cache
-----","stop scan
+DIFFERENCING","difference error
+----","ack data
+----","data error
+----",
+INVENTORYING,"ack inventory
 ----
+INVENTORY COOLDOWN",,,,,,"start cooldown timer
+----
+INVENTORY COOLDOWN"
+DIFFERENCING,,,"calculate difference
+ack difference
+----
+DIFFERENCE COOLDOWN",,,,"start cooldown timer
+----
+DIFFERENCE COOLDOWN"
+"INVENTORY COOLDOWN","ack inventory
+----","ack inventory
+----",,,,,"----
 READY"
-"DIFFERENCE SCANNING",,,"save to young cache
-----","stop scan
-calculate difference
-----
+"DIFFERENCE COOLDOWN",,,"ack difference
+----","ack difference
+----",,,"----
 READY"

@@ -1,0 +1,233 @@
+#+STARTUP: indent
+* 通讯协议
+** 命令编号
+| 编号 | 名称                | 方向   | 说明     |
+|------+---------------------+--------+----------|
+| 0x01 | error               | 下->上 | 错误     |
+| 0x02 | inventory-request   | 上->下 | 盘库请求 |
+| 0x03 | inventory-response  | 下->上 | 盘库响应 |
+| 0x04 | difference-request  | 上->下 | 差异请求 |
+| 0x05 | difference-response | 下->上 | 差异响应 |
+| 0x06 | data-request        | 上->下 | 数据请求 |
+| 0x07 | data-response       | 下->上 | 数据请求 |
+
+** 命令参数矩阵
+| 命令     | 错误编号 | 门号 | 总量 | 增量 | 减量 | 数据范围 | 偏移量 | 数据区 |
+|----------+----------+------+------+------+------+----------+--------+--------|
+| 错误     | ✓        |      |      |      |      |          |        |        |
+| 盘库请求 |          | ✓    |      |      |      |          |        |        |
+| 盘库响应 |          | ✓    | ✓    |      |      |          |        |        |
+| 差异请求 |          | ✓    |      |      |      |          |        |        |
+| 差异响应 |          | ✓    |      | ✓    | ✓    |          |        |        |
+| 数据请求 |          |      | ✓    |      |      | ✓        | ✓      |        |
+| 数据响应 |          |      | ✓    |      |      | ✓        | ✓      | ✓      |
+
+数据响应中的总量用于方便上位机判断是否还有数据需要读取。
+
+** 结构定义
+#+begin_src lisp :tangle /dev/shm/rfid-reader/protocol.tr
+  (struct rfid-payload
+    (byte 0 reader-id)
+    (byte 1 cmd) ;; 命令编号
+    (int 2 sn)
+    (byte 3 errno) ;; 错误编号
+    (byte 4 door) ;; 门编号
+    (short 5 len) ;; 总量
+    (short 6 increment) ;; 增量
+    (short 7 decrement) ;; 增量
+    (byte 8 data-scope) ;; 数据范围
+    (short 9 offset) ;; 标签偏移量
+    (byte* 10 data) ;; 标签数据区
+    (byte* 11 distribution) ;; 热度分布(和标签数据是一一对应关系)
+    )
+#+end_src
+** 数据封包
+#+begin_src c :tangle /dev/shm/rfid-reader/packet.h
+  #ifndef __RFID_READER_PACKET_H
+  #define __RFID_READER_PACKET_H
+  #include <stdint.h>
+  #include "rfid_payload.h"
+
+  #define _populate_packet_to_tx_1(packet, tx, line) do {                 \
+      uint32_t elen##line = packet_calculate_encode_size(packet);         \
+      uint8_t ebuf##line[elen##line];                                     \
+      uint8_t size_of_len##line = 0;                                      \
+      if (elen##line < 128) {                                             \
+        size_of_len##line = 1;                                            \
+      } else if (elen##line < 16384) {                                    \
+        size_of_len##line = 2;                                            \
+      } else if (elen##line < 2097152) {                                  \
+        size_of_len##line = 3;                                            \
+      } else {                                                            \
+        size_of_len##line = 4;                                            \
+      }                                                                   \
+      if (ring_available(tx) >= elen##line + size_of_len##line) {         \
+        bzero(ebuf##line, elen##line);                                    \
+        uint32_t len##line = packet_encode(packet, ebuf##line, elen##line); \
+        elen##line = len##line;                                           \
+        while (elen##line > 0) {                                          \
+          ring_write(tx, elen##line & 0x7F);                              \
+          elen##line = elen##line >> 7;                                   \
+        }                                                                 \
+        ring_write_array(tx, ebuf##line, 0, len##line);                   \
+      }                                                                   \
+    } while (0)
+
+  #define _populate_packet_to_tx_0(packet, tx, line) _populate_packet_to_tx_1(packet, tx, line)
+
+  #define populate_packet_to_tx(packet, tx) _populate_packet_to_tx_0(packet, tx, __LINE__)
+
+  typedef enum CMD_TYPE {
+    UNKNOWN = 0x00,
+    ERROR = 0x01,
+    INVENTORY_REQUEST = 0x02,
+    INVENTORY_RESPONSE = 0x03,
+    DIFFERENCE_REQUEST = 0x04,
+    DIFFERENCE_RESPONSE = 0x05,
+    DATA_REQUEST = 0x06,
+    DATA_RESPONSE = 0x07,
+  } cmd_type_t;
+
+  enum DATA_SCOPE {
+    INCREMENT_SCOPE = 0x01,
+    DECREMENT_SCOPE = 0x02,
+    TOTAL_SCOPE = 0x03,
+  };
+
+  struct packet_t {
+    uint8_t devid;
+    rfid_payload_t payload;
+  };
+
+  uint32_t packet_calculate_encode_size(struct packet_t * packet);
+  uint32_t packet_encode(struct packet_t * packet, uint8_t * buf, uint32_t size);
+  uint32_t packet_estimate_decode_size(uint8_t * buf, uint32_t size);
+  uint32_t packet_decode(uint8_t * buf, uint32_t size, uint32_t estimated, struct packet_t * packet);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/packet.c
+  #include "packet.h"
+  #include "hash.h"
+  #include "base64.h"
+
+  /*
+    packet layout:
+
+            +-+-+-+-+-+-+-+-+
+    byte 0  |1|0|1|0|0|1|0|1|   magic number 0
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 1  |0|1|0|1|1|0|1|0|   magic number 1
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 2  |x|x|x|x|x|x|x|x|   adle32-0 of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 3  |x|x|x|x|x|x|x|x|   adle32-1 of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 4  |x|x|x|x|x|x|x|x|   adle32-2 of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 5  |x|x|x|x|x|x|x|x|   adle32-3 of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 6  |x|x|x|x|x|x|x|x|   type (4 bit) and id (4 bit)
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 7  |x|x|x|x|x|x|x|x|   LSB of length of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 8  |x|x|x|x|x|x|x|x|   MSB of length of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte 9  |x|x|x|x|x|x|x|x|   begin of data
+            +-+-+-+-+-+-+-+-+
+                    .
+                    .
+                    .
+            +-+-+-+-+-+-+-+-+
+    byte n  |x|x|x|x|x|x|x|x|   end of data
+            +-+-+-+-+-+-+-+-+
+
+  ,*/
+
+
+  #define PACKET_META_SIZE (2 + 4 + 1 + 2) // magic number + checksum + type and id + length
+
+  uint32_t packet_calculate_encode_size(struct packet_t * packet) {
+    return base64_encode_length(rfid_payload_calculate_size(&packet->payload)) + PACKET_META_SIZE;
+  }
+
+  uint32_t packet_encode(struct packet_t * packet, uint8_t * buf, uint32_t size) {
+    uint32_t payload_size = rfid_payload_calculate_size(&packet->payload);
+    uint8_t zbuf[payload_size];
+    int zsize = rfid_payload_encode_zeropack(&packet->payload, zbuf, payload_size);
+    uint32_t base64_len = base64_encode(zbuf, zsize, buf + PACKET_META_SIZE, size - PACKET_META_SIZE);
+    buf[0] = 0xAA;
+    buf[1] = 0x55;
+    buf[6] = packet->devid;
+    buf[7] = base64_len & 0xFF;
+    buf[8] = (base64_len >> 8) & 0xFF;
+    uint32_t checksum = adler32(buf + 2 + 4, base64_len + 3); // include type and id, length
+    buf[2] = checksum & 0xFF;
+    buf[3] = (checksum >> 8) & 0xFF;
+    buf[4] = (checksum >> 16) & 0xFF;
+    buf[5] = (checksum >> 24) & 0xFF;
+    return base64_len + PACKET_META_SIZE;
+  }
+
+  uint32_t packet_estimate_decode_size(uint8_t * buf, uint32_t size) {
+    if (size <= PACKET_META_SIZE) return 0;
+    if (buf[0] != 0xAA || buf[1] != 0x55) {
+      return 0;
+    }
+    uint32_t len = buf[7];
+    len += (buf[8] << 8);
+    if (len + PACKET_META_SIZE > size) return 0;
+    uint32_t checksum = adler32(buf + 2 + 4, len + 2);
+    if ((buf[2] == (checksum & 0xFF)) &&
+        (buf[3] == ((checksum >> 8) & 0xFF)) &&
+        (buf[4] == ((checksum >> 16) & 0xFF)) &&
+        (buf[5] == ((checksum >> 24) & 0xFF))) {
+      uint32_t zlen = base64_decode_length(buf + PACKET_META_SIZE, len);
+      if (zlen == 0) return 0;
+      uint8_t zbuf[zlen];
+      base64_decode(buf + PACKET_META_SIZE, len, zbuf, zlen);
+      return rfid_payload_estimate_zeropack_size(zbuf, zlen) + PACKET_META_SIZE;
+    }
+    return 0;
+  }
+
+  uint32_t packet_decode(uint8_t * buf, uint32_t size, uint32_t estimated, struct packet_t * packet) {
+    if (size < PACKET_META_SIZE) return 0;
+    if (buf[0] != 0xAA || buf[1] != 0x55) {
+      return 0;
+    }
+    uint32_t len = buf[7];
+    len += (buf[8] << 8);
+    if (len + PACKET_META_SIZE > size) return 0;
+    uint32_t checksum = adler32(buf + 2 + 4, len + 2);
+    if ((buf[2] == (checksum & 0xFF)) &&
+        (buf[3] == ((checksum >> 8) & 0xFF)) &&
+        (buf[4] == ((checksum >> 16) & 0xFF)) &&
+        (buf[5] == ((checksum >> 24) & 0xFF))) {
+      uint32_t zlen = base64_decode_length(buf + PACKET_META_SIZE - 1, len);
+      if (zlen == 0) return 0;
+      uint8_t zbuf[zlen];
+      zlen = base64_decode(buf + PACKET_META_SIZE, len, zbuf, zlen);
+      uint8_t dbuf[estimated];
+      return rfid_payload_decode_zeropack(zbuf, zlen, dbuf, &packet->payload);
+    }
+    return 0;
+  }
+#+end_src

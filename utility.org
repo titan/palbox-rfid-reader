@@ -1,5 +1,125 @@
 #+STARTUP: indent
 * 辅助代码
+** base64
+#+begin_src c :tangle /dev/shm/rfid-reader/base64.h
+  #ifndef _BASE64_H
+  #define _BASE64_H
+  #include <stdint.h>
+  uint32_t base64_encode_length(uint32_t len);
+  uint32_t base64_encode(const uint8_t *src, uint32_t len, uint8_t *dst, uint32_t dst_len);
+
+  uint32_t base64_decode_length(const uint8_t * buf, uint32_t len);
+  uint32_t base64_decode(const uint8_t * src, const uint32_t len, uint8_t * dst, const uint32_t dstlen);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/base64.c
+  #include <stdint.h>
+  #include "base64.h"
+
+  static const uint8_t base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  uint32_t base64_encode_length(uint32_t len) {
+    uint32_t olen = len * 4 / 3 + 4; /* 3-byte blocks to 4-byte */
+    return olen;
+  }
+
+  uint32_t base64_encode(const uint8_t *src, uint32_t len, uint8_t *dst, uint32_t dst_len) {
+    uint8_t *pos;
+    const uint8_t *end;
+
+    if (dst_len < len)
+      return 0; /* integer overflow */
+
+    end = src + len;
+    pos = dst;
+    while (end - src >= 3) {
+      ,*pos++ = base64_table[src[0] >> 2];
+      ,*pos++ = base64_table[((src[0] & 0x03) << 4) | (src[1] >> 4)];
+      ,*pos++ = base64_table[((src[1] & 0x0f) << 2) | (src[2] >> 6)];
+      ,*pos++ = base64_table[src[2] & 0x3f];
+      src += 3;
+    }
+
+    if (end - src) {
+      ,*pos++ = base64_table[src[0] >> 2];
+      if (end - src == 1) {
+        ,*pos++ = base64_table[(src[0] & 0x03) << 4];
+        ,*pos++ = '=';
+      } else {
+        ,*pos++ = base64_table[((src[0] & 0x03) << 4) | (src[1] >> 4)];
+        ,*pos++ = base64_table[(src[1] & 0x0f) << 2];
+      }
+      ,*pos++ = '=';
+    }
+
+    return pos - dst;
+  }
+
+  static const int b64index[256] = {
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 62, 63, 62, 62, 63, 52, 53, 54, 55,
+    56, 57, 58, 59, 60, 61,  0,  0,  0,  0,  0,  0,  0,  0,  1,  2,  3,  4,  5,  6,
+    7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,  0,
+    0,  0,  0, 63,  0, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51
+  };
+
+  uint32_t base64_decode_length(const uint8_t * buf, uint32_t len) {
+    int pad = len > 0 && (len % 4 || buf[len - 1] == '=');
+    uint32_t L = ((len + 3) / 4 - pad) * 4;
+    uint32_t size = L / 4 * 3 + pad;
+    if (len > L + 2 && buf[L + 2] != '=') size ++;
+    return size;
+  }
+
+  uint32_t base64_decode(const uint8_t * src, const uint32_t len, uint8_t * dst, const uint32_t dstlen) {
+    uint32_t ptr = 0;
+    int pad = len > 0 && (len % 4 || src[len - 1] == '=');
+    const uint32_t L = (dstlen - pad) / 3 * 4;
+
+    for (uint32_t i = 0; i < L; i += 4) {
+      int n = b64index[src[i]] << 18 | b64index[src[i + 1]] << 12 | b64index[src[i + 2]] << 6 | b64index[src[i + 3]];
+      dst[ptr++] = n >> 16;
+      dst[ptr++] = n >> 8 & 0xFF;
+      dst[ptr++] = n & 0xFF;
+    }
+    if (pad) {
+      int n = b64index[src[L]] << 18 | b64index[src[L + 1]] << 12;
+      dst[ptr++] = n >> 16;
+
+      if (len > L + 2 && src[L + 2] != '=') {
+        n |= b64index[src[L + 2]] << 6;
+        dst[ptr++] = n >> 8 & 0xFF;
+      }
+    }
+    return ptr;
+  }
+
+#+end_src
+** hash
+#+begin_src c :tangle /dev/shm/rfid-reader/hash.h
+  #ifndef __HASH_H
+  #define __HASH_H
+  #include <stdint.h>
+
+  uint32_t adler32(uint8_t * buf, uint32_t size);
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/hash.c
+  #include "hash.h"
+
+  uint32_t adler32(uint8_t * buf, uint32_t size) {
+    uint32_t a = 1, b = 0;
+    for (uint8_t i = 0; i < size; i ++) {
+      uint8_t d = buf[i];
+      a = (a + d) % 66521;
+      b = (a + b) % 66521;
+    }
+    return (b << 16) | a;
+  }
+
+#+end_src
 ** ring
 #+begin_src c :tangle /dev/shm/rfid-reader/ring.h
   #ifndef __RING_H

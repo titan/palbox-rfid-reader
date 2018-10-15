@@ -1,15 +1,8 @@
-state\event,inventory,difference,SCANNED,TIMEOUT
+state\event,scan,SCANNED,TIMEOUT
 READY,"swap and scan
 ----
-INVENTORY SCANNING","swap and scan
-----
-DIFFERENCE SCANNING",,
-"INVENTORY SCANNING",,,"save to young cache
+SCANNING",,
+SCANNING,,"save to young cache
 ----","stop scan
-----
-READY"
-"DIFFERENCE SCANNING",,,"save to young cache
-----","stop scan
-calculate difference
 ----
 READY"

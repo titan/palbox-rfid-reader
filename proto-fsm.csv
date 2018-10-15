@@ -1,0 +1,87 @@
+state\event,0x55,0xAA,other,"countdown = 0",EOI
+READY,,"----
+AA",,,
+AA,"----
+AA 55","----
+READY","----
+READY",,
+"AA 55","set adl0
+----
+AA 55 ADL0","set adl0
+----
+AA 55 ADL0","set adl0
+----
+AA 55 ADL0",,"clear
+----
+READY"
+"AA 55 ADL0","set adl1
+----
+AA 55 ADL0 ADL1","set adl1
+----
+AA 55 ADL0 ADL1","set adl1
+----
+AA 55 ADL0 ADL1",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1","set adl2
+----
+AA 55 ADL0 ADL1 ADL2","set adl2
+----
+AA 55 ADL0 ADL1 ADL2","set adl2
+----
+AA 55 ADL0 ADL1 ADL2",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1 ADL2","set adl3
+----
+AA 55 ADL0 ADL1 ADL2 ADL3","set adl3
+----
+AA 55 ADL0 ADL1 ADL2 ADL3","set adl3
+----
+AA 55 ADL0 ADL1 ADL2 ADL3",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1 ADL2 ADL3","set id
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID","set id
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID","set id
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1 ADL2 ADL3 ID","set len0
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0","set len0
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0","set len0
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0","set countdown
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","set countdown
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","set countdown
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","append
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
+----
+AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA",,"clear
+----
+READY"
+"AA 55 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
+----","append
+----","append
+----","callback
+----
+READY","clear
+----
+READY"

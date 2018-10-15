@@ -1,0 +1,263 @@
+#+STARTUP: indent
+* 上位机
+** 框架
+#+begin_src c :tangle /dev/shm/rfid-reader/epigyny.h
+  #ifndef __EPIGYNY_H
+  #define __EPIGYNY_H
+  #include <stdint.h>
+  #include "ring.h"
+  #include "packet.h"
+  #include "uart.h"
+
+  void epigyny_setup(struct uart_context_t * ctx);
+  <<error-prototype>>
+  <<inventory-prototype>>
+  <<difference-prototype>>
+  <<data-prototype>>
+
+  #endif
+#+end_src
+#+begin_src c :tangle /dev/shm/rfid-reader/epigyny.c
+  #include "epigyny.h"
+  #include "defination.h"
+  #include "utility.h"
+  #include "ring.h"
+  #include "led.h"
+  #include "proto-fsm.h"
+  #include "hash.h"
+
+  #define EPIGYNY_BUFFER_BITSIZE 10
+
+  static struct ring_t tx;
+  uint8_t tx_buffer[2 << (EPIGYNY_BUFFER_BITSIZE - 1)];
+
+  static struct ring_t rx;
+  uint8_t rx_buffer[2 << (EPIGYNY_BUFFER_BITSIZE - 1)];
+
+  <<proto-context>>
+
+  static struct proto_context_t context;
+  static uint32_t proto_state;
+
+  extern void epigyny_callback(struct packet_t * packet);
+
+  <<main-loop>>
+  <<setup>>
+  <<proto-callback>>
+  <<proto-fsm>>
+  <<error>>
+  <<inventory>>
+  <<difference>>
+  <<data>>
+#+end_src
+
+** 设置
+#+begin_src c :noweb-ref setup
+  void epigyny_setup(struct uart_context_t * ctx) {
+
+    ring_init(&tx, tx_buffer, EPIGYNY_BUFFER_BITSIZE);
+    ring_init(&rx, rx_buffer, EPIGYNY_BUFFER_BITSIZE);
+
+    ctx->tx = &tx;
+    ctx->rx = &rx;
+    ctx->baudrate = 9600;
+    ctx->databits = 8;
+    ctx->stopbits = 1;
+    ctx->tx_interval = 1; // 1ms
+    ctx->loop_interval = 9; // 10ms
+    ctx->eventloop = epigyny_eventloop;
+    bzero(&context, sizeof(struct proto_context_t));
+  }
+#+end_src
+** 主循环
+#+begin_src c :noweb-ref main-loop
+  static void epigyny_eventloop(struct uart_context_t * uartctx) {
+    (void) uartctx;
+    if (ring_length(&rx) > 0) {
+      struct proto_context_t * ctx = &context;
+      ctx->rx_timer = systick + 999; // 1 second
+      if (ctx->countdown <= 0xFF) {
+        ctx->countdown --;
+      }
+      uint8_t byte;
+      ring_read(&rx, &byte);
+      ctx->byte = byte;
+      switch (byte) {
+      case 0x55:
+        proto_state = proto_transform_state(proto_state, PROTO_0X55_EVENT, ctx);
+        break;
+      case 0xAA:
+        proto_state = proto_transform_state(proto_state, PROTO_0XAA_EVENT, ctx);
+        break;
+      default:
+        proto_state = proto_transform_state(proto_state, PROTO_OTHER_EVENT, ctx);
+        break;
+      }
+
+      if (ctx->countdown == 0) {
+        proto_state = proto_transform_state(proto_state, PROTO_COUNTDOWN_EQUALS_0_EVENT, ctx);
+      }
+      if (ctx->rx_timer != 0xFFFFFFFF && (systick > ctx->rx_timer)) {
+        proto_state = proto_transform_state(proto_state, PROTO_EOI_EVENT, ctx);
+        ctx->rx_timer = 0xFFFFFFFF;
+      }
+    }
+  }
+#+end_src
+** 协议状态机
+#+begin_src c :noweb-ref proto-fsm
+  void proto_do_action(enum PROTO_ACTION action, void * data) {
+    struct proto_context_t * ctx = (struct proto_context_t *) data;
+    switch (action) {
+    case PROTO_SET_ADL0_ACTION:
+      ctx->adler[0] = ctx->byte;
+      break;
+    case PROTO_SET_ADL1_ACTION:
+      ctx->adler[1] = ctx->byte;
+      break;
+    case PROTO_SET_ADL2_ACTION:
+      ctx->adler[2] = ctx->byte;
+      break;
+    case PROTO_SET_ADL3_ACTION:
+      ctx->adler[3] = ctx->byte;
+      break;
+    case PROTO_SET_ID_ACTION:
+      ctx->id = ctx->byte;
+      break;
+    case PROTO_SET_LEN0_ACTION:
+      ctx->len0 = ctx->byte;
+      break;
+    case PROTO_SET_COUNTDOWN_ACTION:
+      ctx->countdown = (ctx->byte << 8) + ctx->len0;
+      break;
+    case PROTO_APPEND_ACTION:
+      ctx->buf[ctx->ptr ++] = ctx->byte;
+      break;
+    case PROTO_CLEAR_ACTION:
+      bzero(ctx, sizeof(struct proto_context_t));
+      ctx->countdown = (uint32_t) 0xFFFFFFFF;
+      break;
+    case PROTO_CALLBACK_ACTION:
+      if (RFID_READER_ID == ctx->id) {
+        uint32_t checksum = adler32(ctx->buf, ctx->ptr);
+        if (ctx->adler[0] ==  (checksum & 0xFF) &&
+            ctx->adler[1] == ((checksum >> 8) & 0xFF) &&
+            ctx->adler[2] == ((checksum >> 16) & 0xFF) &&
+            ctx->adler[3] == ((checksum >> 24) & 0xFF)) {
+          epigyny_proto_callback(ctx->buf, ctx->ptr);
+        }
+      }
+      bzero(ctx, sizeof(struct proto_context_t));
+      ctx->countdown = (uint32_t) 0xFFFFFFFF;
+      break;
+    }
+  }
+#+end_src
+** 协议解析上下文
+
+解析上下文里要存放在解析过程中用到的临时数据。
+| name      | type   |                                                                                 |
+|-----------+--------+---------------------------------------------------------------------------------|
+| buf       | [byte] | 解析过程中使用的缓冲区                                                          |
+| ptr       | uint32 | 记录可用缓冲区的位置                                                            |
+| byte      | byte   | 解析的当前数据                                                                  |
+| id        | byte   | 设备的ID                                                                        |
+| adler     | [byte] | 数据包的 ADLER32 校验                                                           |
+| len0      | byte   | 数据包长度的 LSB                                                                |
+| countdown | uint32 | 剩余应读取内容的长度。为 0 时产生 countdown = 0 事件。                          |
+| rx_timer  | uint32 | 最后一次接收到数据的时间戳。当前事件与 rx_timer 差异大于 1000 时，产生 EOI 事件 |
+
+#+begin_src c :noweb-ref proto-context
+  struct proto_context_t {
+    uint8_t buf[1024];
+    uint32_t ptr;
+    uint8_t byte;
+    uint8_t id;
+    uint8_t adler[4];
+    uint8_t len0;
+    uint32_t countdown;
+    uint32_t rx_timer;
+  };
+#+end_src
+
+** 协议回调
+#+begin_src c :noweb-ref proto-callback
+  static void epigyny_proto_callback(uint8_t * buf, uint32_t size) {
+    uint32_t len = packet_estimate_decode_size(buf, size);
+    uint8_t tmp[len];
+    bzero(tmp, len);
+    struct packet_t * packet = (struct packet_t *) &tmp;
+    epigyny_callback(packet);
+  }
+#+end_src
+** 错误上报
+#+begin_src c :noweb-ref error-prototype
+  void epigyny_error(uint8_t errno);
+#+end_src
+#+begin_src c :noweb-ref error
+  void epigyny_error(uint8_t errno) {
+    struct packet_t packet;
+    bzero(&packet, sizeof(struct packet_t));
+
+    packet.devid = RFID_READER_ID;
+    packet.payload.cmd = ERROR;
+    packet.payload.errno = errno;
+
+    populate_packet_to_tx(&packet, &tx);
+  }
+#+end_src
+** 盘点响应
+#+begin_src c :noweb-ref inventory-prototype
+  void epigyny_ack_inventory(uint8_t door, uint16_t num);
+#+end_src
+#+begin_src c :noweb-ref inventory
+  void epigyny_ack_inventory(uint8_t door, uint16_t num) {
+    struct packet_t packet;
+    bzero(&packet, sizeof(struct packet_t));
+
+    packet.devid = RFID_READER_ID;
+    packet.payload.cmd = INVENTORY_RESPONSE;
+    packet.payload.door = door;
+    packet.payload.len = num;
+
+    populate_packet_to_tx(&packet, &tx);
+  }
+#+end_src
+** 差异响应
+#+begin_src c :noweb-ref difference-prototype
+  void epigyny_ack_difference(uint8_t door, uint16_t increment, uint16_t decrement);
+#+end_src
+#+begin_src c :noweb-ref difference
+  void epigyny_ack_difference(uint8_t door, uint16_t increment, uint16_t decrement) {
+    struct packet_t packet;
+    bzero(&packet, sizeof(struct packet_t));
+
+    packet.devid = RFID_READER_ID;
+    packet.payload.cmd = DIFFERENCE_RESPONSE;
+    packet.payload.door = door;
+    packet.payload.increment = increment;
+    packet.payload.decrement = decrement;
+
+    populate_packet_to_tx(&packet, &tx);
+  }
+#+end_src
+** 数据响应
+#+begin_src c :noweb-ref data-prototype
+  void epigyny_ack_data(uint8_t data_scope, uint16_t num, uint16_t offset, uint8_t * data, uint16_t len);
+#+end_src
+#+begin_src c :noweb-ref data
+  void epigyny_ack_data(uint8_t data_scope, uint16_t num, uint16_t offset, uint8_t * data, uint16_t len) {
+    struct packet_t packet;
+    bzero(&packet, sizeof(struct packet_t));
+
+    packet.devid = RFID_READER_ID;
+    packet.payload.cmd = DATA_RESPONSE;
+    packet.payload.data_scope = data_scope;
+    packet.payload.len = num;
+    packet.payload.offset = offset;
+    packet.payload.data = data;
+    packet.payload.__data_len = len;
+
+    populate_packet_to_tx(&packet, &tx);
+  }
+#+end_src
