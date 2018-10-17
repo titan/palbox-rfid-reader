@@ -95,6 +95,7 @@
   };
 
   struct packet_t {
+    uint8_t devtype;
     uint8_t devid;
     rfid_payload_t payload;
   };
@@ -109,48 +110,59 @@
   #include "packet.h"
   #include "hash.h"
   #include "base64.h"
-
   /*
     packet layout:
 
             +-+-+-+-+-+-+-+-+
-    byte 0  |1|0|1|0|0|1|0|1|   magic number 0
+    byte 0  |1|1|0|0|1|1|0|0|   magic number 0
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 1  |0|1|0|1|1|0|1|0|   magic number 1
+    byte 1  |1|1|0|0|0|0|1|1|   magic number 1
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 2  |x|x|x|x|x|x|x|x|   adle32-0 of data
+    byte 2  |0|0|1|1|1|1|0|0|   magic number 2
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 3  |x|x|x|x|x|x|x|x|   adle32-1 of data
+    byte 3  |0|0|1|1|0|0|1|1|   magic number 3
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 4  |x|x|x|x|x|x|x|x|   adle32-2 of data
+    byte 4  |x|x|x|x|x|x|x|x|   adle32-0 of data
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 5  |x|x|x|x|x|x|x|x|   adle32-3 of data
+    byte 5  |x|x|x|x|x|x|x|x|   adle32-1 of data
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 6  |x|x|x|x|x|x|x|x|   type (4 bit) and id (4 bit)
+    byte 6  |x|x|x|x|x|x|x|x|   adle32-2 of data
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 7  |x|x|x|x|x|x|x|x|   LSB of length of data
+    byte 7  |x|x|x|x|x|x|x|x|   adle32-3 of data
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 8  |x|x|x|x|x|x|x|x|   MSB of length of data
+    byte 8  |x|x|x|x|x|x|x|x|   type (4 bit) and id (4 bit)
             +-+-+-+-+-+-+-+-+
 
             +-+-+-+-+-+-+-+-+
-    byte 9  |x|x|x|x|x|x|x|x|   begin of data
+    byte 9  |0|0|0|0|0|0|0|0|   version
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte A  |x|x|x|x|x|x|x|x|   lsb of length of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte B  |x|x|x|x|x|x|x|x|   msb of length of data
+            +-+-+-+-+-+-+-+-+
+
+            +-+-+-+-+-+-+-+-+
+    byte C  |x|x|x|x|x|x|x|x|   begin of data
             +-+-+-+-+-+-+-+-+
                     .
                     .
@@ -162,7 +174,7 @@
   ,*/
 
 
-  #define PACKET_META_SIZE (2 + 4 + 1 + 2) // magic number + checksum + type and id + length
+  #define PACKET_META_SIZE (4 + 4 + 1 + 1 + 2) // magic number + checksum + type and id + ver + length
 
   uint32_t packet_calculate_encode_size(struct packet_t * packet) {
     return base64_encode_length(rfid_payload_calculate_size(&packet->payload)) + PACKET_META_SIZE;
@@ -173,32 +185,37 @@
     uint8_t zbuf[payload_size];
     int zsize = rfid_payload_encode_zeropack(&packet->payload, zbuf, payload_size);
     uint32_t base64_len = base64_encode(zbuf, zsize, buf + PACKET_META_SIZE, size - PACKET_META_SIZE);
-    buf[0] = 0xAA;
-    buf[1] = 0x55;
-    buf[6] = packet->devid;
-    buf[7] = base64_len & 0xFF;
-    buf[8] = (base64_len >> 8) & 0xFF;
-    uint32_t checksum = adler32(buf + 2 + 4, base64_len + 3); // include type and id, length
-    buf[2] = checksum & 0xFF;
-    buf[3] = (checksum >> 8) & 0xFF;
-    buf[4] = (checksum >> 16) & 0xFF;
-    buf[5] = (checksum >> 24) & 0xFF;
+    buf[0] = 0xCC;
+    buf[1] = 0xC3;
+    buf[2] = 0x3C;
+    buf[3] = 0x33;
+    buf[8] = 0x10 | packet->devid;
+    buf[9] = 0x00;
+    buf[10] = base64_len & 0xFF;
+    buf[11] = (base64_len >> 8) & 0xFF;
+    uint32_t checksum = adler32(buf + 4 + 4, base64_len + 4 /* type and id + ver + length */);
+    buf[4] = checksum & 0xFF;
+    buf[5] = (checksum >> 8) & 0xFF;
+    buf[6] = (checksum >> 16) & 0xFF;
+    buf[7] = (checksum >> 24) & 0xFF;
     return base64_len + PACKET_META_SIZE;
   }
 
   uint32_t packet_estimate_decode_size(uint8_t * buf, uint32_t size) {
     if (size <= PACKET_META_SIZE) return 0;
-    if (buf[0] != 0xAA || buf[1] != 0x55) {
+    if ((buf[8] & 0xF0) != 0x10) return 0; // not my type
+    if ((buf[8] & 0x0F) != RFID_READER_ID) return 0; // not my packet
+    if (buf[0] != 0xCC || buf[1] != 0xC3 || buf[2] != 0x3C || buf[3] != 0x33) {
       return 0;
     }
-    uint32_t len = buf[7];
-    len += (buf[8] << 8);
+    uint32_t len = buf[10];
+    len += (buf[11] << 8);
     if (len + PACKET_META_SIZE > size) return 0;
-    uint32_t checksum = adler32(buf + 2 + 4, len + 2);
-    if ((buf[2] == (checksum & 0xFF)) &&
-        (buf[3] == ((checksum >> 8) & 0xFF)) &&
-        (buf[4] == ((checksum >> 16) & 0xFF)) &&
-        (buf[5] == ((checksum >> 24) & 0xFF))) {
+    uint32_t checksum = adler32(buf + 4 + 4, len + 4);
+    if ((buf[4] == (checksum & 0xFF)) &&
+        (buf[5] == ((checksum >> 8) & 0xFF)) &&
+        (buf[6] == ((checksum >> 16) & 0xFF)) &&
+        (buf[7] == ((checksum >> 24) & 0xFF))) {
       uint32_t zlen = base64_decode_length(buf + PACKET_META_SIZE, len);
       if (zlen == 0) return 0;
       uint8_t zbuf[zlen];
@@ -210,18 +227,21 @@
 
   uint32_t packet_decode(uint8_t * buf, uint32_t size, uint32_t estimated, struct packet_t * packet) {
     if (size < PACKET_META_SIZE) return 0;
-    if (buf[0] != 0xAA || buf[1] != 0x55) {
+    if ((buf[8] & 0xF0) != 0x10) return 0; // not my type
+    if ((buf[8] & 0x0F) != RFID_READER_ID) return 0; // not my packet
+    if (buf[0] != 0xCC || buf[1] != 0xC3 || buf[2] != 0x3C || buf[3] != 0x33) {
       return 0;
     }
-    uint32_t len = buf[7];
-    len += (buf[8] << 8);
+    uint32_t len = buf[10];
+    len += (buf[11] << 8);
     if (len + PACKET_META_SIZE > size) return 0;
-    uint32_t checksum = adler32(buf + 2 + 4, len + 2);
-    if ((buf[2] == (checksum & 0xFF)) &&
-        (buf[3] == ((checksum >> 8) & 0xFF)) &&
-        (buf[4] == ((checksum >> 16) & 0xFF)) &&
-        (buf[5] == ((checksum >> 24) & 0xFF))) {
-      uint32_t zlen = base64_decode_length(buf + PACKET_META_SIZE - 1, len);
+    uint32_t checksum = adler32(buf + 4 + 4, len + 4);
+    if ((buf[4] == (checksum & 0xFF)) &&
+        (buf[5] == ((checksum >> 8) & 0xFF)) &&
+        (buf[6] == ((checksum >> 16) & 0xFF)) &&
+        (buf[7] == ((checksum >> 24) & 0xFF))) {
+      packet->devid = buf[8] & 0x0F;
+      uint32_t zlen = base64_decode_length(buf + PACKET_META_SIZE, len);
       if (zlen == 0) return 0;
       uint8_t zbuf[zlen];
       zlen = base64_decode(buf + PACKET_META_SIZE, len, zbuf, zlen);
