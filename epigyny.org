@@ -25,6 +25,7 @@
   #include "led.h"
   #include "proto-fsm.h"
   #include "hash.h"
+  #include "console.h"
 
   #define EPIGYNY_BUFFER_BITSIZE 10
 
@@ -169,6 +170,7 @@
       uint8_t tmp[len];
       bzero(tmp, len);
       struct packet_t * packet = (struct packet_t *) &tmp;
+      packet_decode(buf, size, len, packet);
       epigyny_callback(packet);
     }
   }

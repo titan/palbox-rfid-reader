@@ -241,8 +241,20 @@
     uart_isr(1 - 1);
   }
 
+  void usart2_isr(void) {
+    uart_isr(2 - 1);
+  }
+
   void usart3_isr(void) {
     uart_isr(3 - 1);
+  }
+
+  void uart4_isr(void) {
+    uart_isr(4 - 1);
+  }
+
+  void uart5_isr(void) {
+    uart_isr(5 - 1);
   }
 
 #+end_src

@@ -122,52 +122,63 @@ CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID","reset
 READY","reset
 ----
 READY"
-"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID","append and set len0
+"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID",,,"append
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0","append and set len0
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER","append
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0","append and set len0
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER","append
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0","append and set len0
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0","append and set len0
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0","reset
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER","reset
 ----
 READY","reset
 ----
 READY"
-"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0","append and set countdown
+"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER","append and set len0
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","append and set countdown
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0","append and set len0
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","append and set countdown
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0","append and set len0
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","append and set countdown
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0","append and set len0
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","append and set countdown
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0","append and set len0
 ----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","reset
-----
-READY","reset
-----
-READY"
-"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1","append
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
-----
-CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","reset
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0","reset
 ----
 READY","reset
 ----
 READY"
-"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID LEN0 LEN1 DATA","append
+"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0","append and set countdown
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1","append and set countdown
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1","append and set countdown
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1","append and set countdown
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1","append and set countdown
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1","reset
+----
+READY","reset
+----
+READY"
+"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1","append
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1 DATA","append
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1 DATA","append
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1 DATA","append
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1 DATA","append
+----
+CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1 DATA","reset
+----
+READY","reset
+----
+READY"
+"CC C3 3C 33 ADL0 ADL1 ADL2 ADL3 ID VER LEN0 LEN1 DATA","append
 ----","append
 ----","append
 ----","append

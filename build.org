@@ -333,5 +333,5 @@
 #+end_src
 ** config
 #+begin_src makefile :tangle /dev/shm/rfid-reader/config.orig
-  DEBUG=1
+
 #+end_src

@@ -38,7 +38,6 @@
   volatile uint32_t sn = 0;
   volatile int64_t timestamp = 0;
   volatile int64_t zone = 0;
-  volatile uint32_t reboot_start = 0;
   volatile uint32_t systick = 0;
   uint32_t randkey[4];
   uint8_t * uid = (uint8_t *)randkey;
@@ -46,7 +45,7 @@
   uint32_t core_state;
 
   struct uart_context_t uart1_context;
-  struct uart_context_t uart3_context;
+  struct uart_context_t uart4_context;
 
   <<rfid-cache-define>>
   <<core-context>>
@@ -77,9 +76,9 @@
 
     uart_init(1, &uart1_context);
 
-    uart3_context.setup = epigyny_setup;
+    uart4_context.setup = epigyny_setup;
 
-    uart_init(3, &uart3_context);
+    uart_init(4, &uart4_context);
 
     bzero(&core_context, sizeof(struct core_context_t));
 
@@ -126,6 +125,7 @@
   uint32_t inventory_timer = 0;
   uint32_t difference_timer = 0;
   uint32_t cooldown_timer = 0;
+  uint32_t reboot_timer = 0;
 
   int main(void) {
 
@@ -137,7 +137,7 @@
     }
     console_newline();
 
-    reboot_start = systick;
+    reboot_timer = systick + 10 * 60 * 1000;
     uint32_t loop_timer = systick;
     uart_start();
     rfid_cache_init();
@@ -147,7 +147,7 @@
     while (1) {
       if (systick > loop_timer) {
         loop_timer = systick + 999; // interval of one second
-        if (timestamp > MIN_TIMESTAMP || (systick - reboot_start < 10 * 60 * 1000 )) {
+        if (systick < reboot_timer) {
           iwdg_reset();
         } else {
           console_log("Stopping to feed watch dog\r\n");
@@ -156,23 +156,28 @@
           if (systick > rfid_timer) {
             task_state = task_transform_state(task_state, TASK_TIMEOUT_EVENT, NULL);
           }
+          reboot_timer = systick + 10 * 60 * 1000;
         }
         if (core_state == CORE_INVENTORYING_STATE) {
           if (systick > inventory_timer) {
             core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, &core_context);
           }
+          reboot_timer = systick + 10 * 60 * 1000;
         } else if (core_state == CORE_DIFFERENCING_STATE) {
           if (systick > difference_timer) {
             core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, &core_context);
           }
+          reboot_timer = systick + 10 * 60 * 1000;
         } else if (core_state == CORE_INVENTORY_COOLDOWN_STATE) {
           if (systick > cooldown_timer) {
             core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, &core_context);
           }
+          reboot_timer = systick + 10 * 60 * 1000;
         } else if (core_state == CORE_DIFFERENCE_COOLDOWN_STATE) {
           if (systick > cooldown_timer) {
             core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, &core_context);
           }
+          reboot_timer = systick + 10 * 60 * 1000;
         }
       }
 
@@ -406,6 +411,7 @@
   void epigyny_callback(struct packet_t * packet) {
     switch (packet->payload.cmd) {
     case INVENTORY_REQUEST:
+      console_log("INVENTORY-REQUEST\r\n");
       if (task_state == TASK_READY_STATE) {
         core_state = core_transform_state(core_state, CORE_INVENTORY_COMMA_RFID_IDLE_EVENT, &core_context);
       } else {
@@ -413,6 +419,7 @@
       }
       break;
     case DIFFERENCE_REQUEST:
+      console_log("DIFFERENCE-REQUEST\r\n");
       if (task_state == TASK_READY_STATE) {
         core_state = core_transform_state(core_state, CORE_DIFFERENCE_COMMA_RFID_IDLE_EVENT, &core_context);
       } else {
@@ -420,6 +427,7 @@
       }
       break;
     case DATA_REQUEST:
+      console_log("DATA-REQUEST\r\n");
       if (task_state == TASK_READY_STATE) {
         core_context.data_scope = packet->payload.data_scope;
         core_context.offset = packet->payload.offset;
@@ -430,6 +438,9 @@
       }
       break;
     default:
+      console_log("UNKNOWN-REQUEST ");
+      console_number(packet->payload.cmd);
+      console_newline();
       break;
     }
   }

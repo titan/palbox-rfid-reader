@@ -193,7 +193,7 @@
     buf[9] = 0x00;
     buf[10] = base64_len & 0xFF;
     buf[11] = (base64_len >> 8) & 0xFF;
-    uint32_t checksum = adler32(buf + 4 + 4, base64_len + 4 /* type and id + ver + length */);
+    uint32_t checksum = adler32(buf + 4 + 4 /* magic + checksum */, base64_len + 4 /* type and id + ver + length */);
     buf[4] = checksum & 0xFF;
     buf[5] = (checksum >> 8) & 0xFF;
     buf[6] = (checksum >> 16) & 0xFF;
@@ -211,7 +211,7 @@
     uint32_t len = buf[10];
     len += (buf[11] << 8);
     if (len + PACKET_META_SIZE > size) return 0;
-    uint32_t checksum = adler32(buf + 4 + 4, len + 4);
+    uint32_t checksum = adler32(buf + 4 + 4 /* magic + checksum */, len + 4 /* id + ver + len*/);
     if ((buf[4] == (checksum & 0xFF)) &&
         (buf[5] == ((checksum >> 8) & 0xFF)) &&
         (buf[6] == ((checksum >> 16) & 0xFF)) &&
@@ -235,7 +235,7 @@
     uint32_t len = buf[10];
     len += (buf[11] << 8);
     if (len + PACKET_META_SIZE > size) return 0;
-    uint32_t checksum = adler32(buf + 4 + 4, len + 4);
+    uint32_t checksum = adler32(buf + 4 + 4 /* magic + checksum */, len + 4 /* id + ver + len*/);
     if ((buf[4] == (checksum & 0xFF)) &&
         (buf[5] == ((checksum >> 8) & 0xFF)) &&
         (buf[6] == ((checksum >> 16) & 0xFF)) &&
