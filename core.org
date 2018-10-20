@@ -85,7 +85,7 @@
     rcc_clock_setup_in_hse_8mhz_out_72mhz();
     rcc_periph_clock_enable(RCC_AFIO);
     rcc_peripheral_enable_clock(&RCC_APB1ENR, RCC_APB1ENR_PWREN | RCC_APB1ENR_BKPEN);
-    gpio_primary_remap(AFIO_MAPR_SWJ_CFG_JTAG_OFF_SW_ON, AFIO_MAPR_USART3_REMAP_NO_REMAP);
+    //gpio_primary_remap(AFIO_MAPR_SWJ_CFG_JTAG_OFF_SW_ON, AFIO_MAPR_USART3_REMAP_NO_REMAP);
 
     uint64_t restored_timestamp = BKP_DR1 | (((uint64_t) BKP_DR2) << 32);
 
@@ -365,7 +365,7 @@
           }
           break;
         }
-        case TOTAL_SCOPE: {
+        case ALL_SCOPE: {
           uint8_t buf[(MAXRFID + 2) * TAGSIZE]; // the first TAGSIZE bytes save the iterator of tags and the address of data
           bzero(buf, (MAXRFID + 2) * TAGSIZE);  // and the second TAGSIZE bytes save the offset, the num params and count of copied tags
           ,* (uint8_t **)(buf + 2) = data_young;
@@ -381,6 +381,10 @@
     case CORE_DATA_ERROR_ACTION:
       epigyny_error(3);
       break;
+    case CORE_COUNT_NEWLINE_ACK_INVENTORY_ACTION:
+      ctx->num = cache_young->size[cache_young->root];
+      epigyny_ack_inventory(ctx->door, ctx->num);
+      break;
     case CORE_START_COOLDOWN_TIMER_ACTION:
       cooldown_timer = systick + 2999; // 3 seconds
       break;
@@ -391,6 +395,7 @@
       bzero(missingtags, (MAXRFID + 2));
       sbtree_sequence(cache_young, new_seq, ctx, sizeof(struct core_context_t *));
       sbtree_sequence(cache_old, missing_seq, ctx, sizeof(struct core_context_t *));
+      epigyny_ack_difference(ctx->door, ctx->increment, ctx->decrement);
       break;
     }
     case CORE_ACK_INVENTORY_ACTION:
@@ -412,6 +417,7 @@
     switch (packet->payload.cmd) {
     case INVENTORY_REQUEST:
       console_log("INVENTORY-REQUEST\r\n");
+      core_context.door = packet->payload.door;
       if (task_state == TASK_READY_STATE) {
         core_state = core_transform_state(core_state, CORE_INVENTORY_COMMA_RFID_IDLE_EVENT, &core_context);
       } else {
@@ -420,6 +426,7 @@
       break;
     case DIFFERENCE_REQUEST:
       console_log("DIFFERENCE-REQUEST\r\n");
+      core_context.door = packet->payload.door;
       if (task_state == TASK_READY_STATE) {
         core_state = core_transform_state(core_state, CORE_DIFFERENCE_COMMA_RFID_IDLE_EVENT, &core_context);
       } else {

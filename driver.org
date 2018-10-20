@@ -20,6 +20,11 @@
     uint32_t tx_timer;
     uint32_t tx_interval;
     uint32_t tx_to_send;
+    uint8_t manual;
+    uint8_t flow_value;
+    uint32_t flow_port;
+    uint32_t flow_io;
+    uint32_t flow_rcc;
     //uint8_t uart;
     uart_setup_fn setup;
     uart_start_fn start;
@@ -114,7 +119,7 @@
   }
 
   void uart_setup() {
-    for (uint8_t i = 0; i < 5; i ++) {
+  for (uint8_t i = 0; i < 5; i ++) {
       if (ctxs[i] != NULL) {
         ctxs[i]->setup(ctxs[i]);
 
@@ -125,6 +130,12 @@
 
         gpio_set_mode(TX_GPIO_PORT[i], GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, TX_GPIO_IO[i]);
         gpio_set_mode(RX_GPIO_PORT[i], GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, RX_GPIO_IO[i]);
+
+        if (ctxs[i]->manual == 1) {
+          rcc_periph_clock_enable(ctxs[i]->flow_rcc);
+          gpio_set_mode(ctxs[i]->flow_port, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, ctxs[i]->flow_io);
+          gpio_clear(ctxs[i]->flow_port, ctxs[i]->flow_io);
+        }
 
         /* Setup UART parameters. */
         usart_set_baudrate(UART[i], ctxs[i]->baudrate);
@@ -178,9 +189,13 @@
               len |= (byte & 0x7F) << (count * 7);
 
               ctx->tx_to_send = len;
-              USART_CR1(UART[i]) |= USART_CR1_TXEIE;
+              //USART_CR1(UART[i]) |= USART_CR1_TXEIE;
             }
           } else {
+            if (ctx->manual == 1 && ctx->flow_value == 0) {
+              gpio_set(ctx->flow_port, ctx->flow_io);
+              ctx->flow_value = 1;
+            }
             USART_CR1(UART[i]) |= USART_CR1_TXEIE;
           }
         }
@@ -217,7 +232,10 @@
     if (((USART_CR1(UART[idx]) & USART_CR1_TXEIE) != 0) && ((USART_SR(UART[idx]) & USART_SR_TXE) != 0)) {
       if (ctx->tx_to_send == 0) {
         USART_CR1(UART[idx]) &= ~USART_CR1_TXEIE;
-        //console_newline();
+        if (ctx->manual == 1) {
+          /* Enable transmission complete interrupt. */
+          USART_CR1(UART[idx]) |= USART_CR1_TCIE;
+        }
         return;
       }
 
@@ -226,13 +244,20 @@
       if (result == 0) {
         /* Disable the TXE interrupt, it's no longer needed. */
         USART_CR1(UART[idx]) &= ~USART_CR1_TXEIE;
-        //console_newline();
       } else {
         /* Put data into the transmit register. */
         usart_send(UART[idx], data);
         ctx->tx_to_send --;
-        //console_byte(data);
-        //console_char(' ');
+      }
+    }
+
+    /* Check if we were called because of TC. */
+    if (((USART_CR1(UART[idx]) & USART_CR1_TCIE) != 0) && ((USART_SR(UART[idx]) & USART_SR_TC) != 0)) {
+      if (ctx->tx_to_send == 0) {
+        USART_CR1(UART[idx]) &= ~USART_CR1_TCIE;
+        gpio_clear(ctx->flow_port, ctx->flow_io);
+        ctx->flow_value = 0;
+        return;
       }
     }
   }

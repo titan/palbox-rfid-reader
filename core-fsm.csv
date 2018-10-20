@@ -12,7 +12,8 @@ DIFFERENCING","difference error
 ----","ack data
 ----","data error
 ----",
-INVENTORYING,"ack inventory
+INVENTORYING,"count
+ack inventory
 ----
 INVENTORY COOLDOWN",,,,,,"start cooldown timer
 ----
@@ -23,11 +24,13 @@ ack difference
 DIFFERENCE COOLDOWN",,,,"start cooldown timer
 ----
 DIFFERENCE COOLDOWN"
-"INVENTORY COOLDOWN","ack inventory
+"INVENTORY COOLDOWN","count
+ack inventory
 ----","ack inventory
 ----",,,,,"----
 READY"
-"DIFFERENCE COOLDOWN",,,"ack difference
+"DIFFERENCE COOLDOWN",,,"calculate difference
+ack difference
 ----","ack difference
 ----",,,"----
 READY"

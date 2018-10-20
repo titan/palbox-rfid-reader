@@ -18,6 +18,8 @@
   #endif
 #+end_src
 #+begin_src c :tangle /dev/shm/rfid-reader/epigyny.c
+  #include <libopencm3/stm32/gpio.h>
+  #include <libopencm3/stm32/rcc.h>
   #include "epigyny.h"
   #include "defination.h"
   #include "utility.h"
@@ -67,6 +69,11 @@
     ctx->tx_interval = 1; // 1ms
     ctx->loop_interval = 9; // 10ms
     ctx->eventloop = epigyny_eventloop;
+    ctx->manual = 1;
+    ctx->flow_value = 0;
+    ctx->flow_rcc = RCC_GPIOA;
+    ctx->flow_port = GPIOA;
+    ctx->flow_io = GPIO12;
     bzero(&context, sizeof(struct proto_context_t));
   }
 #+end_src
@@ -83,6 +90,8 @@
       uint8_t byte;
       ring_read(&rx, &byte);
       ctx->byte = byte;
+      console_byte(ctx->byte);
+      console_char(' ');
       switch (byte) {
       case 0x33:
         proto_state = proto_transform_state(proto_state, PROTO_0X33_EVENT, ctx);
@@ -107,6 +116,7 @@
       if (ctx->rx_timer != 0xFFFFFFFF && (systick > ctx->rx_timer)) {
         proto_state = proto_transform_state(proto_state, PROTO_EOI_EVENT, ctx);
         ctx->rx_timer = 0xFFFFFFFF;
+        console_newline();
       }
     }
   }
@@ -188,6 +198,10 @@
     packet.payload.cmd = ERROR;
     packet.payload.errno = errno;
 
+    console_log("error ");
+    console_number(errno);
+    console_newline();
+
     populate_packet_to_tx(&packet, &tx);
   }
 #+end_src
@@ -206,6 +220,11 @@
     packet.payload.len = num;
 
     populate_packet_to_tx(&packet, &tx);
+    console_log("ack inventory, door: ");
+    console_number(door);
+    console_string(", num: ");
+    console_number(num);
+    console_newline();
   }
 #+end_src
 ** 差异响应
@@ -224,6 +243,14 @@
     packet.payload.decrement = decrement;
 
     populate_packet_to_tx(&packet, &tx);
+
+    console_log("ack difference, door: ");
+    console_number(door);
+    console_string(", increment: ");
+    console_number(increment);
+    console_string(", decrement: ");
+    console_number(decrement);
+    console_newline();
   }
 #+end_src
 ** 数据响应
@@ -244,5 +271,15 @@
     packet.payload.__data_len = len;
 
     populate_packet_to_tx(&packet, &tx);
+
+    console_log("ack data, scope: ");
+    console_number(data_scope);
+    console_string(", num: ");
+    console_number(num);
+    console_string(", offset: ");
+    console_number(offset);
+    console_string(", len: ");
+    console_number(len);
+    console_newline();
   }
 #+end_src

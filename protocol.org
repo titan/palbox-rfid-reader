@@ -91,7 +91,7 @@
   enum DATA_SCOPE {
     INCREMENT_SCOPE = 0x01,
     DECREMENT_SCOPE = 0x02,
-    TOTAL_SCOPE = 0x03,
+    ALL_SCOPE = 0xFF,
   };
 
   struct packet_t {
