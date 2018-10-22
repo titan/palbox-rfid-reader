@@ -228,6 +228,7 @@
   void sbtree_sequence(struct sbtree_t * tree, seqfun seq, void * data, size_t len);
   void sbtree_init(struct sbtree_t * tree, sbtidx_t * left, sbtidx_t * right, sbtidx_t * size, sbtidx_t * key, sbtidx_t n);
   void sbtree_clear(struct sbtree_t * tree);
+  #define sbtree_size(tree) (tree->size[tree->root])
   #endif
 #+end_src
 #+begin_src c :tangle /dev/shm/rfid-reader/sbtree.c
