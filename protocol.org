@@ -31,14 +31,15 @@
     (byte 1 cmd) ;; 命令编号
     (int 2 sn)
     (byte 3 errno) ;; 错误编号
-    (byte 4 door) ;; 门编号
-    (short 5 len) ;; 总量
-    (short 6 increment) ;; 增量
-    (short 7 decrement) ;; 增量
-    (byte 8 data-scope) ;; 数据范围
-    (short 9 offset) ;; 标签偏移量
-    (byte* 10 data) ;; 标签数据区
-    (byte* 11 distribution) ;; 热度分布(和标签数据是一一对应关系)
+    (int 4 duration) ;; RFID 的扫描时长(ms)
+    (byte 5 door) ;; 门编号
+    (short 6 len) ;; 总量
+    (short 7 increment) ;; 增量
+    (short 8 decrement) ;; 增量
+    (byte 9 data-scope) ;; 数据范围
+    (short 10 offset) ;; 标签偏移量
+    (byte* 11 data) ;; 标签数据区
+    (byte* 12 distribution) ;; 热度分布(和标签数据是一一对应关系)
     )
 #+end_src
 ** 数据封包

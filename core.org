@@ -234,6 +234,7 @@
 ** 任务状态机
 #+begin_src c :noweb-ref task-fsm
   void task_do_action(enum TASK_ACTION action, void * data) {
+    struct core_context_t * ctx = (struct core_context_t *) data;
     switch (action) {
     case TASK_SWAP_AND_SCAN_ACTION: {
       struct sbtree_t * tmp = cache_old;
@@ -245,7 +246,7 @@
       sbtree_clear(cache_young);
       bzero(temp, MAXRFID * TAGSIZE);
       rfid_scan();
-      rfid_timer = systick + 9999;
+      rfid_timer = systick + ctx->duration;
       break;
     }
     case TASK_SAVE_TO_YOUNG_CACHE_ACTION: {
@@ -254,15 +255,6 @@
       sbtidx_t key = getkey(tag, len);
       if (sbtree_find(cache_young, key) == 0) {
         sbtidx_t pos = sbtree_insert(cache_young, key);
-        /*
-        console_log("key: ");
-        console_number(key);
-        console_string(", len: ");
-        console_number(len);
-        console_string(", pos: ");
-        console_number(pos);
-        console_newline();
-        */
         memcpy(data_young + pos * TAGSIZE, tag, len);
       }
       break;
@@ -278,6 +270,7 @@
 *** 上下文
 #+begin_src c :noweb-ref core-context
   struct core_context_t {
+    uint32_t duration;
     uint8_t door;
     uint16_t num;
     uint16_t increment;
@@ -332,7 +325,7 @@
     struct core_context_t * ctx = (struct core_context_t *) data;
     switch (action) {
     case CORE_INVENTORY_NEWLINE_ACK_NEWLINE_START_TIMER_ACTION:
-      task_state = task_transform_state(task_state, TASK_SCAN_EVENT, NULL);
+      task_state = task_transform_state(task_state, TASK_SCAN_EVENT, ctx);
       epigyny_error(0);
       inventory_timer = systick + 9999; // 10 seconds
       break;
@@ -340,7 +333,7 @@
       epigyny_error(1);
       break;
     case CORE_DIFFERENCE_NEWLINE_ACK_NEWLINE_START_TIMER_ACTION:
-      task_state = task_transform_state(task_state, TASK_SCAN_EVENT, NULL);
+      task_state = task_transform_state(task_state, TASK_SCAN_EVENT, ctx);
       epigyny_error(0);
       difference_timer = systick + 9999; // 10 seconds
       break;
@@ -418,6 +411,7 @@
     case INVENTORY_REQUEST:
       console_log("INVENTORY-REQUEST\r\n");
       core_context.door = packet->payload.door;
+      core_context.duration = (packet->payload.duration != 0) ? packet->payload.duration: 9999 ;
       if (task_state == TASK_READY_STATE) {
         core_state = core_transform_state(core_state, CORE_INVENTORY_COMMA_RFID_IDLE_EVENT, &core_context);
       } else {
@@ -427,6 +421,7 @@
     case DIFFERENCE_REQUEST:
       console_log("DIFFERENCE-REQUEST\r\n");
       core_context.door = packet->payload.door;
+      core_context.duration = (packet->payload.duration != 0) ? packet->payload.duration: 9999 ;
       if (task_state == TASK_READY_STATE) {
         core_state = core_transform_state(core_state, CORE_DIFFERENCE_COMMA_RFID_IDLE_EVENT, &core_context);
       } else {
