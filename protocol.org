@@ -66,10 +66,11 @@
         bzero(ebuf##line, elen##line);                                    \
         uint32_t len##line = packet_encode(packet, ebuf##line, elen##line); \
         elen##line = len##line;                                           \
-        while (elen##line > 0) {                                          \
-          ring_write(tx, elen##line & 0x7F);                              \
+        while (elen##line > 0x7F) {                                       \
+          ring_write(tx, ((elen##line & 0x7F) | 0x80));                   \
           elen##line = elen##line >> 7;                                   \
         }                                                                 \
+        ring_write(tx, elen##line);                                       \
         ring_write_array(tx, ebuf##line, 0, len##line);                   \
       }                                                                   \
     } while (0)

@@ -19,7 +19,6 @@
   #include "uart.h"
   #include "led.h"
   #include "rfid.h"
-  #include "task-fsm.h"
   #include "core-fsm.h"
   #include "sbtree.h"
   #include "epigyny.h"
@@ -64,7 +63,6 @@
 
   <<setup>>
   <<mainloop>>
-  <<task-fsm>>
   <<core-fsm>>
   <<epigyny-callback>>
 #+end_src
@@ -121,9 +119,7 @@
 #+end_src
 ** 主循环
 #+begin_src c :noweb-ref mainloop
-  uint32_t rfid_timer = 0;
-  uint32_t inventory_timer = 0;
-  uint32_t difference_timer = 0;
+  uint32_t cmd_timer = 0;
   uint32_t cooldown_timer = 0;
   uint32_t reboot_timer = 0;
 
@@ -141,7 +137,6 @@
     uint32_t loop_timer = systick;
     uart_start();
     rfid_cache_init();
-    task_state = task_transform_state(task_state, TASK_SCAN_EVENT, NULL);
     core_state = CORE_READY_STATE;
 
     while (1) {
@@ -152,19 +147,13 @@
         } else {
           console_log("Stopping to feed watch dog\r\n");
         }
-        if (task_state == TASK_SCANNING_STATE) {
-          if (systick > rfid_timer) {
-            task_state = task_transform_state(task_state, TASK_TIMEOUT_EVENT, NULL);
-          }
-          reboot_timer = systick + 10 * 60 * 1000;
-        }
         if (core_state == CORE_INVENTORYING_STATE) {
-          if (systick > inventory_timer) {
+          if (systick > cmd_timer) {
             core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, &core_context);
           }
           reboot_timer = systick + 10 * 60 * 1000;
         } else if (core_state == CORE_DIFFERENCING_STATE) {
-          if (systick > difference_timer) {
+          if (systick > cmd_timer) {
             core_state = core_transform_state(core_state, CORE_TIMEOUT_EVENT, &core_context);
           }
           reboot_timer = systick + 10 * 60 * 1000;
@@ -192,24 +181,24 @@
 由于 size balanced tree 不保存卫星数据， 因此引入 rfid data 用于保存标
 签数据。
 #+begin_src c :noweb-ref rfid-cache-define
-  #define MAXRFID 300
+  #define MAXTAGS 300
   #define TAGSIZE 6
   static struct sbtree_t tree1, tree2;
-  static sbtidx_t rfid_sbtree_left1[MAXRFID], rfid_sbtree_right1[MAXRFID], rfid_sbtree_size1[MAXRFID], rfid_sbtree_key1[MAXRFID];
-  static sbtidx_t rfid_sbtree_left2[MAXRFID], rfid_sbtree_right2[MAXRFID], rfid_sbtree_size2[MAXRFID], rfid_sbtree_key2[MAXRFID];
+  static sbtidx_t rfid_sbtree_left1[MAXTAGS], rfid_sbtree_right1[MAXTAGS], rfid_sbtree_size1[MAXTAGS], rfid_sbtree_key1[MAXTAGS];
+  static sbtidx_t rfid_sbtree_left2[MAXTAGS], rfid_sbtree_right2[MAXTAGS], rfid_sbtree_size2[MAXTAGS], rfid_sbtree_key2[MAXTAGS];
   static struct sbtree_t * cache_old, * cache_young;
-  static uint8_t rfid_data1[MAXRFID * TAGSIZE], rfid_data2[MAXRFID * TAGSIZE];
+  static uint8_t rfid_data1[MAXTAGS * TAGSIZE], rfid_data2[MAXTAGS * TAGSIZE];
   static uint8_t * data_old, * data_young;
 
   static void rfid_cache_init(void) {
-    sbtree_init(&tree1, rfid_sbtree_left1, rfid_sbtree_right1, rfid_sbtree_size1, rfid_sbtree_key1, MAXRFID);
-    sbtree_init(&tree2, rfid_sbtree_left2, rfid_sbtree_right2, rfid_sbtree_size2, rfid_sbtree_key2, MAXRFID);
+    sbtree_init(&tree1, rfid_sbtree_left1, rfid_sbtree_right1, rfid_sbtree_size1, rfid_sbtree_key1, MAXTAGS);
+    sbtree_init(&tree2, rfid_sbtree_left2, rfid_sbtree_right2, rfid_sbtree_size2, rfid_sbtree_key2, MAXTAGS);
     cache_old = &tree1;
     cache_young = &tree2;
     data_old = (uint8_t *) rfid_data1;
     data_young = (uint8_t *) rfid_data2;
-    bzero(data_old, MAXRFID * TAGSIZE);
-    bzero(data_young, MAXRFID * TAGSIZE);
+    bzero(data_old, MAXTAGS * TAGSIZE);
+    bzero(data_young, MAXTAGS * TAGSIZE);
   }
 #+end_src
 *** 计算 KEY
@@ -228,44 +217,9 @@
     void * data[2];
     data[0] = tag;
     data[1] = &len;
-    task_state = task_transform_state(task_state, TASK_SCANNED_EVENT, data);
+    core_state = core_transform_state(core_state, CORE_SCANNED_EVENT, data);
   }
 #+end_src
-** 任务状态机
-#+begin_src c :noweb-ref task-fsm
-  void task_do_action(enum TASK_ACTION action, void * data) {
-    struct core_context_t * ctx = (struct core_context_t *) data;
-    switch (action) {
-    case TASK_SWAP_AND_SCAN_ACTION: {
-      struct sbtree_t * tmp = cache_old;
-      cache_old = cache_young;
-      cache_young = tmp;
-      uint8_t * temp = data_old;
-      data_old = data_young;
-      data_young = temp;
-      sbtree_clear(cache_young);
-      bzero(temp, MAXRFID * TAGSIZE);
-      rfid_scan();
-      rfid_timer = systick + ctx->duration;
-      break;
-    }
-    case TASK_SAVE_TO_YOUNG_CACHE_ACTION: {
-      uint8_t * tag = * (uint8_t **) data;
-      size_t len = * (size_t *)(((size_t **) data)[1]);
-      sbtidx_t key = getkey(tag, len);
-      if (sbtree_find(cache_young, key) == 0) {
-        sbtidx_t pos = sbtree_insert(cache_young, key);
-        memcpy(data_young + pos * TAGSIZE, tag, len);
-      }
-      break;
-    }
-    case TASK_STOP_SCAN_ACTION:
-      rfid_stop();
-      break;
-    }
-  }
-#+end_src
-
 ** 核心状态机
 *** 上下文
 #+begin_src c :noweb-ref core-context
@@ -277,14 +231,14 @@
     uint16_t decrement;
     uint8_t data_scope;
     uint16_t offset;
-    uint8_t newtags[MAXRFID * TAGSIZE];
-    uint8_t missingtags[MAXRFID * TAGSIZE];
+    uint8_t newtags[MAXTAGS * TAGSIZE];
+    uint8_t missedtags[MAXTAGS * TAGSIZE];
   };
 #+end_src
 *** 执行动作
 
 #+begin_src c :noweb-ref core-fsm
-  static void new_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
+  static void calc_new_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
     (void) tree;
     (void) len;
     struct core_context_t * ctx = (struct core_context_t *) data;
@@ -293,13 +247,27 @@
     }
   }
 
-  static void missing_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
+  static void set_new_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
+    (void) tree;
+    (void) len;
+    struct core_context_t * ctx = (struct core_context_t *) data;
+    ctx->newtags[ctx->increment ++] = t;
+  }
+
+  static void calc_missed_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
     (void) tree;
     (void) len;
     struct core_context_t * ctx = (struct core_context_t *) data;
     if (sbtree_find(cache_young, getkey(data_old + t * TAGSIZE, TAGSIZE)) == 0) {
-      ctx->missingtags[ctx->decrement ++] = t;
+      ctx->missedtags[ctx->decrement ++] = t;
     }
+  }
+
+  static void set_missed_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
+    (void) tree;
+    (void) len;
+    struct core_context_t * ctx = (struct core_context_t *) data;
+    ctx->missedtags[ctx->decrement ++] = t;
   }
 
   static void copy_seq(struct sbtree_t * tree, sbtidx_t t, void * data, size_t len) {
@@ -324,79 +292,130 @@
   void core_do_action(enum CORE_ACTION action, void * data) {
     struct core_context_t * ctx = (struct core_context_t *) data;
     switch (action) {
-    case CORE_INVENTORY_NEWLINE_ACK_NEWLINE_START_TIMER_ACTION:
-      task_state = task_transform_state(task_state, TASK_SCAN_EVENT, ctx);
+    case CORE_ACK_NEWLINE_SWAP_AND_SCAN_NEWLINE_START_TIMER_ACTION: {
+      struct sbtree_t * tmp = cache_old;
+      cache_old = cache_young;
+      cache_young = tmp;
+      uint8_t * temp = data_old;
+      data_old = data_young;
+      data_young = temp;
+      sbtree_clear(cache_young);
+      bzero(data_young, MAXTAGS * TAGSIZE);
+      ctx->increment = 0;
+      ctx->decrement = 0;
+      rfid_scan();
       epigyny_error(0);
-      inventory_timer = systick + 9999; // 10 seconds
+      cmd_timer = systick + ctx->duration - 3000;
       break;
-    case CORE_INVENTORY_ERROR_ACTION:
-      epigyny_error(1);
-      break;
-    case CORE_DIFFERENCE_NEWLINE_ACK_NEWLINE_START_TIMER_ACTION:
-      task_state = task_transform_state(task_state, TASK_SCAN_EVENT, ctx);
-      epigyny_error(0);
-      difference_timer = systick + 9999; // 10 seconds
-      break;
-    case CORE_DIFFERENCE_ERROR_ACTION:
-      epigyny_error(2);
-      break;
+    }
     case CORE_ACK_DATA_ACTION:
         switch (ctx->data_scope) {
         case INCREMENT_SCOPE: {
           if (ctx->offset < ctx->increment && ctx->num + ctx->offset <= ctx->increment) {
-            epigyny_ack_data(ctx->data_scope, ctx->increment, ctx->offset, ctx->newtags + ctx->offset * TAGSIZE, ctx->num * TAGSIZE);
+            uint8_t buf[MIN(ctx->increment - ctx->offset, ctx->num) * TAGSIZE];
+            for (sbtidx_t i = ctx->offset, len = MIN(ctx->increment - ctx->offset, ctx->num) + ctx->offset; i < len; i ++) {
+              memcpy(buf + (i - ctx->offset) * TAGSIZE, data_young + ctx->newtags[i] * TAGSIZE, TAGSIZE);
+              console_log("ack increment data ");
+              console_number(ctx->newtags[i]);
+  #ifdef DEBUG
+              console_string(" : ");
+              for (uint8_t j = 0; j < TAGSIZE; j ++) {
+                console_byte(buf[(i - ctx->offset) * TAGSIZE + j]);
+                console_char(' ');
+              }
+  #endif
+              console_newline();
+            }
+            epigyny_ack_data(ctx->data_scope, ctx->increment, ctx->offset, buf, MIN(ctx->increment - ctx->offset, ctx->num) * TAGSIZE);
           } else {
-            epigyny_ack_data(ctx->data_scope, ctx->increment, ctx->offset, ctx->newtags, 0);
+            epigyny_ack_data(ctx->data_scope, ctx->increment, ctx->offset, 0, 0);
           }
           break;
         }
         case DECREMENT_SCOPE: {
           if (ctx->offset < ctx->decrement && ctx->num + ctx->offset <= ctx->decrement) {
-            epigyny_ack_data(ctx->data_scope, ctx->decrement, ctx->offset, ctx->missingtags + ctx->offset * TAGSIZE, ctx->num * TAGSIZE);
+            uint8_t buf[MIN(ctx->decrement - ctx->offset, ctx->num) * TAGSIZE];
+            for (sbtidx_t i = ctx->offset, len = MIN(ctx->decrement - ctx->offset, ctx->num) + ctx->offset; i < len; i ++) {
+              memcpy(buf + (i - ctx->offset) * TAGSIZE, data_old + ctx->missedtags[i] * TAGSIZE, TAGSIZE);
+              console_log("ack decrement data ");
+              console_number(ctx->missedtags[i]);
+  #ifdef DEBUG
+              console_string(" : ");
+              for (uint8_t j = 0; j < TAGSIZE; j ++) {
+                console_byte(buf[(i - ctx->offset) * TAGSIZE + j]);
+                console_char(' ');
+              }
+  #endif
+              console_newline();
+            }
+            epigyny_ack_data(ctx->data_scope, ctx->decrement, ctx->offset, buf, MIN(ctx->decrement - ctx->offset, ctx->num) * TAGSIZE);
           } else {
-            epigyny_ack_data(ctx->data_scope, ctx->decrement, ctx->offset, ctx->missingtags + ctx->offset * TAGSIZE, 0);
+            epigyny_ack_data(ctx->data_scope, ctx->decrement, ctx->offset, 0, 0);
           }
           break;
         }
         default: {
-          uint8_t buf[(MAXRFID + 2) * TAGSIZE]; // the first TAGSIZE bytes save the iterator of tags and the address of data
-          bzero(buf, (MAXRFID + 2) * TAGSIZE);  // and the second TAGSIZE bytes save the offset, the num params and count of copied tags
+          uint8_t buf[(MAXTAGS + 2) * TAGSIZE]; // the first TAGSIZE bytes save the iterator of tags and the address of data
+          bzero(buf, (MAXTAGS + 2) * TAGSIZE);  // and the second TAGSIZE bytes save the offset, the num params and count of copied tags
           ,* (uint8_t **)(buf + 2) = data_young;
           ,* (uint16_t *)(buf + TAGSIZE) = ctx->offset;
           ,* (uint16_t *)(buf + TAGSIZE + sizeof(uint16_t)) = ctx->num;
-          sbtree_sequence(cache_young, copy_seq, buf, (MAXRFID + 2) * TAGSIZE);
+          sbtree_sequence(cache_young, copy_seq, buf, (MAXTAGS + 2) * TAGSIZE);
           uint16_t count = *(uint16_t *)(buf + TAGSIZE + sizeof(uint16_t) * 2);
-          epigyny_ack_data(ctx->data_scope, sbtree_size(cache_young), ctx->offset, buf + TAGSIZE * 2, count * TAGSIZE);
+          epigyny_ack_data(ctx->data_scope, sbtree_size(cache_young), ctx->offset, buf + TAGSIZE * 2 /* skip meta data */, count * TAGSIZE);
           break;
         }
         }
       break;
-    case CORE_DATA_ERROR_ACTION:
-      epigyny_error(3);
+    case CORE_SAVE_TO_YOUNG_CACHE_ACTION: {
+      uint8_t * tag = * (uint8_t **) data;
+      size_t len = * (size_t *)(((size_t **) data)[1]);
+      sbtidx_t key = getkey(tag, len);
+      if (sbtree_find(cache_young, key) == 0) {
+        sbtidx_t pos = sbtree_insert(cache_young, key);
+        memcpy(data_young + pos * TAGSIZE, tag, len);
+      }
       break;
+    }
     case CORE_COUNT_NEWLINE_ACK_INVENTORY_ACTION:
       ctx->num = sbtree_size(cache_young);
       epigyny_ack_inventory(ctx->door, ctx->num);
       break;
-    case CORE_START_COOLDOWN_TIMER_ACTION:
+    case CORE_STOP_SCAN_NEWLINE_START_COOLDOWN_TIMER_ACTION:
+      rfid_stop();
       cooldown_timer = systick + 2999; // 3 seconds
       break;
     case CORE_CALCULATE_DIFFERENCE_NEWLINE_ACK_DIFFERENCE_ACTION: {
-      uint8_t newtags[(MAXRFID + 2)]; // the first 2 bytes is reversed for length of array
-      uint8_t missingtags[(MAXRFID + 2)]; // the first 2 bytes is reversed for length of array
-      bzero(newtags, (MAXRFID + 2));
-      bzero(missingtags, (MAXRFID + 2));
-      sbtree_sequence(cache_young, new_seq, ctx, sizeof(struct core_context_t *));
-      sbtree_sequence(cache_old, missing_seq, ctx, sizeof(struct core_context_t *));
+      uint8_t newtags[(MAXTAGS + 2)]; // the first 2 bytes is reversed for length of array
+      uint8_t missedtags[(MAXTAGS + 2)]; // the first 2 bytes is reversed for length of array
+      bzero(newtags, (MAXTAGS + 2));
+      bzero(missedtags, (MAXTAGS + 2));
+      if (sbtree_size(cache_old) > 0 && sbtree_size(cache_young) > 0) {
+        sbtree_sequence(cache_young, calc_new_seq, ctx, sizeof(struct core_context_t *));
+        sbtree_sequence(cache_old, calc_missed_seq, ctx, sizeof(struct core_context_t *));
+      } else if (sbtree_size(cache_old) > 0) {
+        ctx->increment = 0;
+        sbtree_sequence(cache_old, set_missed_seq, ctx, sizeof(struct core_context_t *));
+      } else if (sbtree_size(cache_young) > 0) {
+        ctx->decrement = 0;
+        sbtree_sequence(cache_young, set_new_seq, ctx, sizeof(struct core_context_t *));
+      } else {
+        ctx->increment = 0;
+        ctx->decrement = 0;
+      }
+      console_log("ack difference len(cache_old): ");
+      console_number(sbtree_size(cache_old));
+      console_string(", len(cache_young): ");
+      console_number(sbtree_size(cache_young));
+      console_string(", increment: ");
+      console_number(ctx->increment);
+      console_string(", decrement: ");
+      console_number(ctx->decrement);
+      console_newline();
+
       epigyny_ack_difference(ctx->door, ctx->increment, ctx->decrement);
       break;
     }
-    case CORE_ACK_INVENTORY_ACTION:
-      epigyny_ack_inventory(ctx->door, ctx->num);
-      break;
-    case CORE_ACK_DIFFERENCE_ACTION:
-      epigyny_ack_difference(ctx->door, ctx->increment, ctx->decrement);
-      break;
     }
   }
 #+end_src
@@ -411,33 +430,27 @@
     case INVENTORY_REQUEST:
       console_log("INVENTORY-REQUEST\r\n");
       core_context.door = packet->payload.door;
-      core_context.duration = (packet->payload.duration != 0) ? packet->payload.duration: 9999 ;
-      if (task_state == TASK_READY_STATE) {
-        core_state = core_transform_state(core_state, CORE_INVENTORY_COMMA_RFID_IDLE_EVENT, &core_context);
-      } else {
-        core_state = core_transform_state(core_state, CORE_INVENTORY_COMMA_RFID_BUSY_EVENT, &core_context);
-      }
+      core_context.duration = (packet->payload.duration != 0) ? packet->payload.duration: 9999;
+      core_state = core_transform_state(core_state, CORE_INVENTORY_EVENT, &core_context);
       break;
     case DIFFERENCE_REQUEST:
       console_log("DIFFERENCE-REQUEST\r\n");
       core_context.door = packet->payload.door;
-      core_context.duration = (packet->payload.duration != 0) ? packet->payload.duration: 9999 ;
-      if (task_state == TASK_READY_STATE) {
-        core_state = core_transform_state(core_state, CORE_DIFFERENCE_COMMA_RFID_IDLE_EVENT, &core_context);
-      } else {
-        core_state = core_transform_state(core_state, CORE_DIFFERENCE_COMMA_RFID_BUSY_EVENT, &core_context);
-      }
+      core_context.duration = (packet->payload.duration != 0) ? packet->payload.duration: 9999;
+      core_state = core_transform_state(core_state, CORE_DIFFERENCE_EVENT, &core_context);
       break;
     case DATA_REQUEST:
-      console_log("DATA-REQUEST\r\n");
-      if (task_state == TASK_READY_STATE) {
-        core_context.data_scope = packet->payload.data_scope;
-        core_context.offset = packet->payload.offset;
-        core_context.num = packet->payload.len;
-        core_state = core_transform_state(core_state, CORE_DATA_COMMA_RFID_IDLE_EVENT, &core_context);
-      } else {
-        core_state = core_transform_state(core_state, CORE_DATA_COMMA_RFID_BUSY_EVENT, &core_context);
-      }
+      console_log("DATA-REQUEST scope: ");
+      console_number(packet->payload.data_scope);
+      console_string(", offset: ");
+      console_number(packet->payload.offset);
+      console_string(", num: ");
+      console_number(packet->payload.len);
+      console_newline();
+      core_context.data_scope = packet->payload.data_scope;
+      core_context.offset = packet->payload.offset;
+      core_context.num = packet->payload.len;
+      core_state = core_transform_state(core_state, CORE_DATA_EVENT, &core_context);
       break;
     default:
       console_log("UNKNOWN-REQUEST ");

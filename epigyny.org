@@ -90,8 +90,10 @@
       uint8_t byte;
       ring_read(&rx, &byte);
       ctx->byte = byte;
+      /*
       console_byte(ctx->byte);
       console_char(' ');
+      */
       switch (byte) {
       case 0x33:
         proto_state = proto_transform_state(proto_state, PROTO_0X33_EVENT, ctx);
@@ -116,7 +118,7 @@
       if (ctx->rx_timer != 0xFFFFFFFF && (systick > ctx->rx_timer)) {
         proto_state = proto_transform_state(proto_state, PROTO_EOI_EVENT, ctx);
         ctx->rx_timer = 0xFFFFFFFF;
-        console_newline();
+        //console_newline();
       }
     }
   }

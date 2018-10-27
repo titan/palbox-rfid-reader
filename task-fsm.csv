@@ -1,8 +1,0 @@
-state\event,scan,SCANNED,TIMEOUT
-READY,"swap and scan
-----
-SCANNING",,
-SCANNING,,"save to young cache
-----","stop scan
-----
-READY"

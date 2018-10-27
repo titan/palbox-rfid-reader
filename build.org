@@ -316,7 +316,7 @@
 #+begin_src makefile :tangle /dev/shm/rfid-reader/Makefile
   BINARY = rfid-reader
 
-  OBJS += base64.o console.o core-fsm.o epigyny.o hash.o led.o packet.o proto-fsm.o rfid-fsm.o rfid.o rfid_payload.o ring.o sbtree.o stack.o task-fsm.o utility.o uart.o zeropack.o
+  OBJS += base64.o console.o core-fsm.o epigyny.o hash.o led.o packet.o proto-fsm.o rfid-fsm.o rfid.o rfid_payload.o ring.o sbtree.o stack.o utility.o uart.o zeropack.o
 
   CFLAGS +=-D RFID_READER_ID=$(RFID_READER_ID) -D ZEROPACK_RFID_PAYLOAD_ENABLED
 

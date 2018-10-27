@@ -15,7 +15,6 @@ UTILITYSRC:=$(BUILDDIR)/utility.c $(BUILDDIR)/ring.c $(BUILDDIR)/sbtree.c $(BUIL
 RFIDSRC:=$(BUILDDIR)/rfid.c $(BUILDDIR)/rfid.h
 RFIDFSMSRC:=$(BUILDDIR)/rfid-fsm.c
 COREFSMSRC:=$(BUILDDIR)/core-fsm.c
-TASKFSMSRC:=$(BUILDDIR)/task-fsm.c
 PROTOFSMSRC:=$(BUILDDIR)/proto-fsm.c
 
 LIBRARY:=$(BUILDDIR)/libopencm3
@@ -27,7 +26,7 @@ include .config
 all: $(TARGET)
 
 
-DEPENDS=$(BUILDSRC) $(CONSOLESRC) $(CORESRC) $(COREFSMSRC) $(DRIVERSRC) $(EPIGYNYSRC) $(PAYLOADSRC) $(PROTOSRC) $(PROTOFSMSRC) $(RFIDFSMSRC) $(RFIDSRC) $(TASKFSMSRC) $(UTILITYSRC) $(LIBRARY) $(CONFIGSRC)
+DEPENDS=$(BUILDSRC) $(CONSOLESRC) $(CORESRC) $(COREFSMSRC) $(DRIVERSRC) $(EPIGYNYSRC) $(PAYLOADSRC) $(PROTOSRC) $(PROTOFSMSRC) $(RFIDFSMSRC) $(RFIDSRC) $(UTILITYSRC) $(LIBRARY) $(CONFIGSRC)
 
 $(TARGET): $(DEPENDS)
 	sed 'a \RFID_READER_ID=1' $(CONFIGSRC) > $(CONFIG)
@@ -59,15 +58,6 @@ $(UTILITYSRC): utility.org | prebuild
 $(RFIDFSMSRC): rfid-fsm.csv | prebuild
 	fsm-generator.py $< -d $(BUILDDIR) --prefix rfid --style table
 #	fsm-generator.py $< -d $(BUILDDIR) --prefix rfid --style table --debug
-#	sed -i '1a#include "console.h"' $@
-#	sed -i '1d' $@
-#	sed -i 's/printf(\"(\");/console_log(\"(\");/g' $@
-#	sed -i 's/printf/console_string/g' $@
-#	sed -i 's/\\n/\\r\\n/g' $@
-
-$(TASKFSMSRC): task-fsm.csv | prebuild
-	fsm-generator.py $< -d $(BUILDDIR) --prefix task --style table
-#	fsm-generator.py $< -d $(BUILDDIR) --prefix task --style table --debug
 #	sed -i '1a#include "console.h"' $@
 #	sed -i '1d' $@
 #	sed -i 's/printf(\"(\");/console_log(\"(\");/g' $@

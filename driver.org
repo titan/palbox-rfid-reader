@@ -46,7 +46,6 @@
   #include <libopencm3/cm3/nvic.h>
   #include "defination.h"
   #include "uart.h"
-  #include "console.h"
 
   static int RCC_UART[5] = {
     RCC_USART1,
@@ -181,10 +180,10 @@
               uint8_t byte = 0;
               uint8_t count = 0;
               ring_read(ctx->tx, &byte);
-              while (byte > 127 && ring_length(ctx->tx) > 0) {
-                ring_read(ctx->tx, &byte);
+              while (byte > 0x7F && ring_length(ctx->tx) > 0) {
                 len |= (byte & 0x7F) << (count * 7);
                 count ++;
+                ring_read(ctx->tx, &byte);
               }
               len |= (byte & 0x7F) << (count * 7);
 
@@ -281,7 +280,6 @@
   void uart5_isr(void) {
     uart_isr(5 - 1);
   }
-
 #+end_src
 ** LED
 #+begin_src c :tangle /dev/shm/rfid-reader/led.h
