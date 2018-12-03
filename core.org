@@ -138,6 +138,9 @@
     uart_start();
     rfid_cache_init();
     core_state = CORE_READY_STATE;
+    core_context.door = 1;
+    core_context.duration = 9999;
+    core_state = core_transform_state(core_state, CORE_INVENTORY_EVENT, &core_context);
 
     while (1) {
       if (systick > loop_timer) {

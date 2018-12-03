@@ -55,7 +55,7 @@ $(RFIDSRC): rfid.org | prebuild
 $(UTILITYSRC): utility.org | prebuild
 	org-tangle $<
 
-$(RFIDFSMSRC): rfid-fsm.csv | prebuild
+$(RFIDFSMSRC): rfid-fsm.txt | prebuild
 	fsm-generator.py $< -d $(BUILDDIR) --prefix rfid --style table
 #	fsm-generator.py $< -d $(BUILDDIR) --prefix rfid --style table --debug
 #	sed -i '1a#include "console.h"' $@
@@ -64,7 +64,7 @@ $(RFIDFSMSRC): rfid-fsm.csv | prebuild
 #	sed -i 's/printf/console_string/g' $@
 #	sed -i 's/\\n/\\r\\n/g' $@
 
-$(COREFSMSRC): core-fsm.csv | prebuild
+$(COREFSMSRC): core-fsm.txt | prebuild
 	fsm-generator.py $< -d $(BUILDDIR) --prefix core --style table
 #	fsm-generator.py $< -d $(BUILDDIR) --prefix core --style table --debug
 #	sed -i '1a#include "console.h"' $@
@@ -73,7 +73,7 @@ $(COREFSMSRC): core-fsm.csv | prebuild
 #	sed -i 's/printf/console_string/g' $@
 #	sed -i 's/\\n/\\r\\n/g' $@
 
-$(PROTOFSMSRC): proto-fsm.csv | prebuild
+$(PROTOFSMSRC): proto-fsm.txt | prebuild
 	fsm-generator.py $< -d $(BUILDDIR) --prefix proto --style table
 #	fsm-generator.py $< -d $(BUILDDIR) --prefix proto --style table --debug
 #	sed -i '1a#include "console.h"' $@
